@@ -2,9 +2,9 @@
 // never enters a container. Patterns are prepared once per run; every sinkhole record is scanned
 // byte-wise in five places (url, header, body, dns names, first TCP/UDP bytes) and the first form
 // that matches yields one canary.hit per (decoy_id, event_seq).
-import { open } from 'node:fs/promises';
 import path from 'node:path';
 import { EVIDENCE_LIMITS } from './schema.mjs';
+import { openRegular } from './sink-reader.mjs';
 
 const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
@@ -102,12 +102,13 @@ function dnsBytes(name) {
   return Buffer.from(String(name).toLowerCase().replace(/\./g, ''), 'latin1');
 }
 
+/** First `maxBytes` of bodies/<id>.bin; `null` when missing, `false` when it is not a regular file. */
 async function readBodyFile(filePath, maxBytes) {
   let fh;
   try {
-    fh = await open(filePath, 'r');
-  } catch {
-    return null;
+    ({ fh } = await openRegular(filePath));
+  } catch (err) {
+    return err.code === 'ENOTREGULAR' || err.code === 'ELOOP' ? false : null;
   }
   try {
     const buf = Buffer.allocUnsafe(maxBytes);
@@ -132,6 +133,7 @@ export function createMatcher({ decoys = [], sinkholeDir = null, limits = EVIDEN
   }
   let scanned = 0;
   let truncated = 0;
+  let decodeErrors = 0;
 
   function budget(bytes) {
     if (scanned + bytes > limits.scanBudgetBytes) {
@@ -182,7 +184,8 @@ export function createMatcher({ decoys = [], sinkholeDir = null, limits = EVIDEN
           out.push({ where: 'body', bytes: Buffer.from(record.body_b64, 'base64') });
         } else if (typeof record.body_ref === 'string' && sinkholeDir && /^bodies\/[A-Za-z0-9_.-]+$/.test(record.body_ref)) {
           const body = await readBodyFile(path.join(sinkholeDir, record.body_ref), limits.bodyMaxBytes);
-          if (body) out.push({ where: 'body', bytes: body });
+          if (body === false) decodeErrors += 1;
+          else if (body) out.push({ where: 'body', bytes: body });
         }
         out.push({ where: 'dns', bytes: dnsBytes(record.host ?? ''), lower: true });
         break;
@@ -227,5 +230,7 @@ export function createMatcher({ decoys = [], sinkholeDir = null, limits = EVIDEN
     },
     scannedBytes: () => scanned,
     truncated: () => truncated > 0,
+    /** body_ref files that were symlinks or otherwise not regular files (never followed). */
+    decodeErrors: () => decodeErrors,
   };
 }

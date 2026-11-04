@@ -2,13 +2,46 @@
 // may not exist yet when the tail starts (the sidecar creates it on the first message) and the
 // tail always starts from byte 0, so nothing written before attach is lost. The generic
 // createFileTail is shared with sinkhole-tail.mjs.
-import { open, stat } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, open } from 'node:fs/promises';
 import path from 'node:path';
 import { EVIDENCE_LIMITS } from './schema.mjs';
 
+// The sinkhole container parses hostile traffic and writes into a directory we read. A compromised
+// container could replace a record file with a symlink to a host file, so every open here refuses
+// to follow links (O_NOFOLLOW is undefined on Windows; the lstat check still applies there).
+const OPEN_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0);
+
+export class NotRegularFileError extends Error {
+  constructor(filePath) {
+    super('not a regular file');
+    this.code = 'ENOTREGULAR';
+    this.path = filePath;
+  }
+}
+
+/**
+ * lstat + open without following symlinks. Resolves `{ fh, size }`; rejects with ENOENT when the
+ * file does not exist and ENOTREGULAR when it is a symlink or anything but a regular file.
+ */
+export async function openRegular(filePath) {
+  const info = await lstat(filePath);
+  if (!info.isFile()) throw new NotRegularFileError(filePath);
+  const fh = await open(filePath, OPEN_FLAGS);
+  try {
+    const after = await fh.stat();
+    if (!after.isFile()) throw new NotRegularFileError(filePath);
+    return { fh, size: after.size };
+  } catch (err) {
+    await fh.close();
+    throw err;
+  }
+}
+
 /**
  * Poll a file for appended lines. `onLine(text)` gets each complete line (without the newline);
- * a truncated/replaced file restarts from 0. `stop()` drains what is on disk first.
+ * a truncated/replaced file restarts from 0. `stop()` drains what is on disk first. Overlong
+ * lines and a file that is not a regular file are counted in `decodeErrors()`.
  */
 export function createFileTail(filePath, { pollMs, onLine, onError = () => {}, maxLineBytes = EVIDENCE_LIMITS.tail.maxLineBytes } = {}) {
   const chunkBytes = EVIDENCE_LIMITS.tail.readChunkBytes;
@@ -19,6 +52,8 @@ export function createFileTail(filePath, { pollMs, onLine, onError = () => {}, m
   let running = false;
   let reading = null;
   let stopped = false;
+  let decodeErrors = 0;
+  let rejected = false;
 
   function emitLines() {
     let start = 0;
@@ -37,27 +72,37 @@ export function createFileTail(filePath, { pollMs, onLine, onError = () => {}, m
     if (pending.length > maxLineBytes) {
       pending = Buffer.alloc(0);
       overlong = true;
+      decodeErrors += 1;
       onError(new Error('line exceeds maxLineBytes'));
     }
   }
 
   async function readOnce() {
-    let info;
+    let opened;
     try {
-      info = await stat(filePath);
+      opened = await openRegular(filePath);
     } catch (err) {
       if (err.code === 'ENOENT') return false;
+      if (err.code === 'ENOTREGULAR' || err.code === 'ELOOP') {
+        // Counted once per occurrence, not once per poll; the file is never followed.
+        if (!rejected) {
+          rejected = true;
+          decodeErrors += 1;
+          onError(new NotRegularFileError(filePath));
+        }
+        return false;
+      }
       throw err;
     }
-    if (info.size < offset) {
-      offset = 0;
-      pending = Buffer.alloc(0);
-    }
-    if (info.size === offset) return false;
-    const fh = await open(filePath, 'r');
+    rejected = false;
+    const { fh, size } = opened;
     try {
-      while (offset < info.size) {
-        const want = Math.min(chunkBytes, info.size - offset);
+      if (size < offset) {
+        offset = 0;
+        pending = Buffer.alloc(0);
+      }
+      while (offset < size) {
+        const want = Math.min(chunkBytes, size - offset);
         const buf = Buffer.allocUnsafe(want);
         const { bytesRead } = await fh.read(buf, 0, want, offset);
         if (bytesRead === 0) break;
@@ -108,6 +153,7 @@ export function createFileTail(filePath, { pollMs, onLine, onError = () => {}, m
       running = false;
     },
     offset: () => offset,
+    decodeErrors: () => decodeErrors,
   };
 }
 
@@ -121,10 +167,7 @@ export function createSinkReader({ traceDir, containerId, onRecord, onClosed = (
   let decodeErrors = 0;
   const tail = createFileTail(path.join(traceDir, `${containerId}.jsonl`), {
     pollMs,
-    onError: (err) => {
-      if (err.message === 'line exceeds maxLineBytes') decodeErrors += 1;
-      onError(err);
-    },
+    onError,
     onLine(line) {
       let record;
       try {
@@ -150,6 +193,6 @@ export function createSinkReader({ traceDir, containerId, onRecord, onClosed = (
     stop: tail.stop,
     drain: tail.drain,
     closed: () => closed,
-    decodeErrors: () => decodeErrors,
+    decodeErrors: () => decodeErrors + tail.decodeErrors(),
   };
 }

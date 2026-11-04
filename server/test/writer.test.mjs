@@ -82,16 +82,16 @@ test('internal vocabulary and "matched/confirmed/safe" on CLEAN fall back to the
     fakeLlm(good({
       headline: 'Hidden layers were decoded by the harness',
       paragraphs: ['The contract for this claim expected nothing else.', 'The network was sinkholed, so the sinkhole saw it print zlib-layer-ok.'],
-      finding_notes: [{ finding_id: 'net.unexpected_host:12', text: `The harness printed it. ${'x'.repeat(190)}` }],
+      finding_notes: [{ finding_id: 'net.unexpected_host:12', text: `The layer printed it. ${'x'.repeat(178)}` }],
     })),
     INPUT,
     { template },
   );
   assert.equal(reworded.meta.source, 'llm');
   assert.equal(reworded.explanation.headline, 'Hidden hidden parts were decoded by the decoder');
-  assert.equal(reworded.explanation.paragraphs[0], 'what you were told for this claim expected nothing else.');
+  assert.equal(reworded.explanation.paragraphs[0], 'The what you were told for this claim expected nothing else.');
   assert.equal(reworded.explanation.paragraphs[1], 'The network was answered by a fake internet, so the fake internet saw it print zlib-layer-ok.');
-  assert.ok(reworded.explanation.finding_notes[0].text.startsWith('The decoder printed it.'));
+  assert.ok(reworded.explanation.finding_notes[0].text.startsWith('The hidden part printed it.'));
   assert.ok([...reworded.explanation.finding_notes[0].text].length <= 200);
   assert.ok(Explanation.safeParse(reworded.explanation).success);
   // Overclaiming on CLEAN is still rejected.

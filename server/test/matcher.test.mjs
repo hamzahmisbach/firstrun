@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -101,6 +101,28 @@ test('scan: body_ref read from sinkholeDir/bodies, capped at bodyMaxBytes; scan 
   const big = await m.scan(http({ body_b64: b64(`${'z'.repeat(1500)}${TOKEN}`) }), 4);
   assert.equal(big.length, 0, 'over budget: not scanned');
   assert.equal(m.truncated(), true);
+});
+
+test('scan: a body_ref that is not a regular file is never followed, only counted', async (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'firstrun-matcher-'));
+  tmp.push(dir);
+  mkdirSync(path.join(dir, 'bodies'));
+  // A directory where the body should be: not a regular file.
+  mkdirSync(path.join(dir, 'bodies/r1.bin'));
+  const m = createMatcher({ decoys, sinkholeDir: dir });
+  assert.deepEqual(await m.scan(http({ body_ref: 'bodies/r1.bin', body_len: 10 }), 1), []);
+  assert.equal(m.decodeErrors(), 1);
+  // A symlink to a "host" file holding a token: must not be read (O_NOFOLLOW / lstat).
+  const host = path.join(dir, 'host-secret');
+  writeFileSync(host, `token=${TOKEN}\n`);
+  try {
+    symlinkSync(host, path.join(dir, 'bodies/r2.bin'), 'file');
+  } catch (err) {
+    t.diagnostic(`symlink not permitted here (${err.code}); symlink case skipped`);
+    return;
+  }
+  assert.deepEqual(await m.scan(http({ body_ref: 'bodies/r2.bin', body_len: 40 }), 2), []);
+  assert.equal(m.decodeErrors(), 2);
 });
 
 test('scanBytes: file tokens on stdout/stderr are hits with a null event_seq; the shim-printed pw is not', () => {

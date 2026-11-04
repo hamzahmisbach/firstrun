@@ -116,7 +116,7 @@ export function createEvidence({ runId, sinkholeDir, traceDir, decoys = [], onEv
     const coverage = normalizer.coverage();
     coverage.scan_truncated = matcher.truncated();
     coverage.scanned_bytes = matcher.scannedBytes();
-    coverage.decode_errors += (sinkReader?.decodeErrors() ?? 0) + (sinkholeTail?.decodeErrors() ?? 0);
+    coverage.decode_errors += (sinkReader?.decodeErrors() ?? 0) + (sinkholeTail?.decodeErrors() ?? 0) + matcher.decodeErrors();
     if (tailErrors.length) coverage.tail_errors = tailErrors.length;
     return coverage;
   }

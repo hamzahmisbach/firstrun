@@ -2,7 +2,7 @@
 // createEvidence tails them, so the file tails, the normalizer and the matcher are exercised
 // together the way the lifecycle will drive them.
 import assert from 'node:assert/strict';
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -232,6 +232,39 @@ test('createEvidence: without a manifest value the credentials read is still a d
   assert.ok(events.some((e) => e.kind === 'file.open' && e.path === '/home/dev/.aws/credentials' && e.decoy_id === 'aws_secret'));
   assert.equal(coverage.sink_closed, true);
   assert.equal(events.filter((e) => e.kind === 'http.request').length, 3);
+});
+
+test('tails never follow a record file that is a symlink or not a regular file', async (t) => {
+  const root = mkdtempSync(path.join(tmpdir(), 'firstrun-evidence-'));
+  tmp.push(root);
+  const sinkholeDir = path.join(root, 'sinkhole');
+  const traceDir = path.join(root, 'trace');
+  mkdirSync(sinkholeDir);
+  mkdirSync(traceDir);
+  const cid = 'a'.repeat(64);
+  // A "host file" with lines the tails would happily parse if they followed links.
+  const hostFile = path.join(root, 'firstrun.env');
+  writeFileSync(hostFile, `${JSON.stringify({ kind: 'dns.query', name: 'leak.test', qtype: 'A', ts_ms: 1 })}\ndnsmasq[1]: query[A] leak.test from 10.0.0.2\n`);
+  mkdirSync(path.join(sinkholeDir, 'events.jsonl')); // a directory in place of the file
+  let symlinks = true;
+  try {
+    symlinkSync(hostFile, path.join(sinkholeDir, 'dns.log'), 'file');
+    symlinkSync(hostFile, path.join(sinkholeDir, 'tcp.jsonl'), 'file');
+    symlinkSync(hostFile, path.join(traceDir, `${cid}.jsonl`), 'file');
+  } catch (err) {
+    symlinks = false;
+    t.diagnostic(`symlink not permitted here (${err.code}); only the non-regular-file case is checked`);
+  }
+  const errors = [];
+  const evidence = createEvidence({ runId: 'CAP00000000000001793793301', sinkholeDir, traceDir, decoys: [], onEvent: () => {}, log: (r) => errors.push(r) });
+  evidence.startSinkhole();
+  evidence.attachSandbox(cid);
+  await sleep(150);
+  const { events, coverage } = await evidence.stop({ graceMs: 50 });
+  assert.deepEqual(events, [], 'nothing from the replaced files');
+  assert.equal(evidence.t0Seen(), false);
+  assert.equal(coverage.decode_errors, symlinks ? 4 : 1, 'one decode error per bad file, not per poll');
+  assert.ok(errors.every((r) => r.code === 'ENOTREGULAR' || r.code === 'ELOOP'));
 });
 
 test('createEvidence: stop() without T0 still returns sinkhole events and no T0', async () => {

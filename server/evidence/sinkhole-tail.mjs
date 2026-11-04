@@ -52,6 +52,6 @@ export function createSinkholeTail({ sinkholeDir, onRecord, onError = () => {}, 
     async stop() {
       for (const t of tails) await t.stop();
     },
-    decodeErrors: () => decodeErrors,
+    decodeErrors: () => decodeErrors + tails.reduce((n, t) => n + t.decodeErrors(), 0),
   };
 }

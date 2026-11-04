@@ -1,0 +1,18 @@
+{
+  "name": "firstrun-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FirstRun orchestrator: HTTP API, run queue, SSE (day-1 scaffold, stub lifecycle).",
+  "type": "module",
+  "main": "main.mjs",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node main.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  }
+}

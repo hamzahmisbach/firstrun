@@ -1,0 +1,25 @@
+{
+  "runtimes": {
+    "runsc": {
+      "path": "/usr/bin/runsc",
+      "runtimeArgs": ["--platform=systrap", "--pod-init-config=/etc/firstrun/trace-session.json"]
+    },
+    "runsc-strace": {
+      "path": "/usr/bin/runsc",
+      "runtimeArgs": [
+        "--platform=systrap",
+        "--debug",
+        "--debug-log=/var/log/firstrun/runsc/%ID%.%COMMAND%.log",
+        "--strace",
+        "--strace-syscalls=execve,execveat,open,openat,creat,connect,clone,fork,vfork",
+        "--strace-log-size=4096"
+      ]
+    },
+    "runsc-plain": {
+      "path": "/usr/bin/runsc",
+      "runtimeArgs": ["--platform=systrap"]
+    }
+  },
+  "default-address-pools": [{ "base": "10.213.0.0/16", "size": 28 }],
+  "live-restore": false
+}

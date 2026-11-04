@@ -1,0 +1,26 @@
+{
+  "trace_session": {
+    "name": "Default",
+    "ignore_missing": false,
+    "points": [
+      { "name": "container/start", "optional_fields": ["env"],
+        "context_fields": ["time", "container_id"] },
+      { "name": "sentry/execve",
+        "context_fields": ["time", "container_id", "thread_id", "group_id",
+                           "parent_thread_group_id", "cwd", "process_name"] },
+      { "name": "syscall/openat/exit", "optional_fields": ["fd_path"],
+        "context_fields": ["time", "container_id", "group_id", "cwd"] },
+      { "name": "syscall/open/exit",
+        "context_fields": ["time", "container_id", "group_id", "cwd"] },
+      { "name": "syscall/creat/exit",
+        "context_fields": ["time", "container_id", "group_id", "cwd"] },
+      { "name": "syscall/connect/enter",
+        "context_fields": ["time", "container_id", "group_id"] }
+    ],
+    "sinks": [
+      { "name": "remote", "ignore_setup_error": false,
+        "config": { "endpoint": "/run/firstrun/gvisor-sink.sock",
+                    "retries": 5, "backoff": "1ms", "backoff_max": "10ms" } }
+    ]
+  }
+}

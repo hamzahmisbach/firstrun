@@ -1,0 +1,22 @@
+#!/bin/sh
+# Executed by entry.sh; its execve is the T0 marker (docs/ARCHITECTURE.md 7.3).
+# execute: run the user's command as pasted. unwrap: run an LLM-written harness (8.3) with an
+# interpreter from a fixed map, never a name taken from the model.
+set -eu
+
+case "${FIRSTRUN_PHASE:-execute}" in
+  execute)
+    exec timeout -s KILL "${FIRSTRUN_TIMEOUT:-60}" bash --noprofile --norc /work/cmd.sh </dev/null
+    ;;
+  unwrap)
+    case "${INTERP:-}:${EXT:-}" in
+      bash:sh | python3:py | node:js | pwsh:ps1) ;;
+      *) echo "launch: unsupported interpreter" >&2; exit 64 ;;
+    esac
+    exec timeout -s KILL "${FIRSTRUN_TIMEOUT:-20}" "$INTERP" "/work/harness.$EXT" </dev/null
+    ;;
+  *)
+    echo "launch: unknown phase" >&2
+    exit 64
+    ;;
+esac

@@ -1,0 +1,27 @@
+[Unit]
+Description=FirstRun orchestrator
+Wants=firstrun-sink.service docker.service caddy.service
+After=network-online.target docker.service firstrun-sink.service
+
+[Service]
+User=firstrun
+Group=firstrun
+SupplementaryGroups=docker
+EnvironmentFile=/etc/firstrun/firstrun.env
+Environment=NODE_ENV=production
+WorkingDirectory=/opt/firstrun/server
+ExecStart=/usr/bin/node /opt/firstrun/server/main.mjs
+Restart=always
+RestartSec=2
+# SIGTERM: stop accepting runs, fail queued ones, give active runs 10 s (server/main.mjs).
+KillSignal=SIGTERM
+TimeoutStopSec=20
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+UMask=0027
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

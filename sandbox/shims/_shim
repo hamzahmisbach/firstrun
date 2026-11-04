@@ -1,0 +1,16 @@
+#!/bin/sh
+# Stand-in for OS-specific tools (docs/ARCHITECTURE.md 5.4). The call itself is recorded from
+# outside the sandbox by the gVisor execve trace point; this script only prints one neutral
+# placeholder line and exits 0. Builtins only (no fork), so it adds no process events of its own.
+value=ok
+if [ -r /seed/shim-canaries.json ]; then
+  IFS= read -r line < /seed/shim-canaries.json || true
+  case "$line" in
+    *'"pw":"'*)
+      value=${line#*\"pw\":\"}
+      value=${value%%\"*}
+      ;;
+  esac
+fi
+printf '%s\n' "$value"
+exit 0

@@ -1,0 +1,4 @@
+# Scripts run on Linux: never check them out with CRLF, even on Windows.
+* text=auto eol=lf
+*.png binary
+*.jpg binary

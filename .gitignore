@@ -1,0 +1,12 @@
+.env
+node_modules/
+
+# Throwaway test CA (scripts/gen-test-ca.sh): the private key must never be committed.
+sinkhole/ca/
+sandbox/build/
+
+# Generated at build time
+sinkhole/canned/
+infra/gvisor-sink/proto/
+infra/gvisor-sink/pb/
+__pycache__/

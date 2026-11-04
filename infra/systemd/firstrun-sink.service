@@ -1,0 +1,23 @@
+[Unit]
+Description=FirstRun gVisor remote-sink receiver (protobuf -> JSONL)
+After=network.target
+Before=firstrun.service
+
+[Service]
+User=firstrun
+Group=firstrun
+# Only this unit owns /run/firstrun: systemd removes it when the owning unit stops,
+# so the orchestrator must not declare it too (docs/ARCHITECTURE.md 12, step 18).
+RuntimeDirectory=firstrun
+RuntimeDirectoryMode=0755
+ExecStart=/usr/bin/python3 -I /opt/firstrun/infra/gvisor-sink/gvisor-sink.py --socket /run/firstrun/gvisor-sink.sock --out-dir /srv/firstrun/trace
+Restart=always
+RestartSec=1
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

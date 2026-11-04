@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>FirstRun report</title>
+  <link rel="stylesheet" href="/static/style.css?v=dev">
+</head>
+<body>
+  <div class="page">
+    <header class="site-head">
+      <a class="wordmark" href="/"><span class="wordmark-mark"></span>FirstRun</a>
+      <span class="tagline">Inspection report</span>
+    </header>
+
+    <main id="main">
+      <p class="muted" id="loading" role="status">Loading the report…</p>
+      <section id="error" class="error-box" role="alert" hidden></section>
+      <section id="live" hidden>
+        <h1 class="section-title" style="font-size:1.4rem;margin-bottom:6px">This run is still in progress</h1>
+        <p class="muted" style="margin-bottom:18px">The page updates live and turns into the report when the run finishes.</p>
+        <div id="run-view"></div>
+      </section>
+      <div id="report" hidden></div>
+    </main>
+
+    <footer class="site-foot">
+      <span>FirstRun runs on Vultr Cloud Compute with gVisor sandboxes, Vultr Serverless Inference for unwrapping and explanations, and Vultr Object Storage for reports.</span>
+      <span>Reports are unlisted and kept for a limited time. To have one removed, contact the team listed in the project README.</span>
+    </footer>
+  </div>
+  <script type="module" src="/static/report.js?v=dev"></script>
+</body>
+</html>

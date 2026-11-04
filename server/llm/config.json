@@ -1,0 +1,13 @@
+{
+  "base_url": "https://api.vultrinference.com/v1",
+  "seed": 7,
+  "prompt_version": "2026-11-04.2",
+  "harness_languages": ["bash", "python3", "node"],
+  "_evidence": "Chosen 2026-11-04 from the real prompts (scratchpad compare-models.mjs, 3 tries per model, benign inputs). glm-5.2/5.3/5.3-flash and minimax-m3.1-flash ignore reasoning:{enabled:false} on the harness prompt (reasoning_tokens == max_completion_tokens, empty content); mimo-v2.6-flash and qwen3.8-flash-next misbehave on the harness prompt in json_schema mode, so the harness call uses json_object. deepseek-v4.1-flash-1017 and qwen3.8-flash-next were valid 9/9 (contract), 3/3 (harness, json_object) and 3/3 (explanation) at 0.7-1.5 s median.",
+  "calls": {
+    "contract":    { "model": "deepseek-v4.1-flash-1017", "fallback_model": "qwen3.8-flash-next", "json_mode": "json_schema", "max_completion_tokens": 1024, "temperature": 0,   "timeout_ms": 20000, "retries": 1 },
+    "harness":     { "model": "deepseek-v4.1-flash-1017", "fallback_model": "qwen3.8-flash-next", "json_mode": "json_object", "max_completion_tokens": 4096, "temperature": 0,   "timeout_ms": 30000, "retries": 0 },
+    "explanation": { "model": "deepseek-v4.1-flash-1017", "fallback_model": "mimo-v2.6-flash",    "json_mode": "json_schema", "max_completion_tokens": 1500, "temperature": 0.3, "timeout_ms": 25000, "retries": 1 },
+    "planner":     { "model": "deepseek-v4.1-flash-1017", "fallback_model": "qwen3.8-flash-next", "json_mode": "json_object", "max_completion_tokens": 2048, "temperature": 0,   "timeout_ms": 30000, "retries": 1, "stretch": true }
+  }
+}

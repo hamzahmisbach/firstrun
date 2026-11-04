@@ -1,0 +1,94 @@
+[
+  {
+    "id": "aws_secret",
+    "path": "~/.aws/credentials",
+    "category": "cloud_credentials",
+    "value": "FRAWSFIXTURETOKEN2345ABC",
+    "forms": [
+      "raw",
+      "b64x3",
+      "b64b64x3",
+      "url",
+      "hex",
+      "base32"
+    ]
+  },
+  {
+    "id": "npm_token",
+    "path": "~/.npmrc",
+    "category": "package_manager_token",
+    "value": "FRNPMFIXTURETOKEN2345ABC",
+    "forms": [
+      "raw",
+      "b64x3",
+      "url",
+      "hex"
+    ]
+  },
+  {
+    "id": "ssh_key",
+    "path": "~/.ssh/id_ed25519",
+    "category": "ssh_private_key",
+    "value": "FRSSHFIXTURETOKEN2345ABC",
+    "forms": [
+      "raw",
+      "b64x3"
+    ]
+  },
+  {
+    "id": "ssh_config",
+    "path": "~/.ssh/config",
+    "category": "ssh_meta",
+    "value": "",
+    "forms": []
+  },
+  {
+    "id": "bash_history",
+    "path": "~/.bash_history",
+    "category": "history",
+    "value": "",
+    "forms": []
+  },
+  {
+    "id": "wallet_seed",
+    "path": "~/.config/Exodus/exodus.wallet/seed.seco",
+    "category": "wallet",
+    "value": "FRWALFIXTURETOKEN2345ABC",
+    "forms": [
+      "raw",
+      "b64x3",
+      "hex"
+    ]
+  },
+  {
+    "id": "gh_hosts",
+    "path": "~/.config/gh/hosts.yml",
+    "category": "vcs_token",
+    "value": "FRGHFIXTURETOKEN23456ABC",
+    "forms": [
+      "raw",
+      "b64x3"
+    ]
+  },
+  {
+    "id": "chrome_login",
+    "path": "~/.config/google-chrome/Default/Login Data",
+    "category": "browser_profile",
+    "value": "FRCHRFIXTURETOKEN2345ABC",
+    "forms": [
+      "raw",
+      "b64x3"
+    ]
+  },
+  {
+    "id": "pw",
+    "path": "",
+    "category": "phished_input",
+    "value": "FRPWFIXTURETOKEN23456ABC",
+    "forms": [
+      "raw",
+      "b64x3",
+      "url"
+    ]
+  }
+]

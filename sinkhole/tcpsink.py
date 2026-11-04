@@ -104,13 +104,18 @@ def serve_udp(port, recorder):
         for level, kind, payload in ancdata:
             if level == socket.SOL_IP and kind == IP_RECVORIGDSTADDR:
                 _, orig_port = parse_sockaddr_in(payload)
-        recorder.write({
+        record = {
             "kind": "udp.datagram",
             "src_port": addr[1],
-            "orig_dst_port": orig_port,
             "len": len(data),
             "first_bytes_hex": data[:FIRST_BYTES].hex(),
-        })
+        }
+        # Measured: for REDIRECTed UDP the ancillary address carries the listener port, not the
+        # real destination. The field is optional (7.4), so omit it rather than report 9009; the
+        # real port is still known from the gVisor connect trace point.
+        if orig_port is not None and orig_port != port:
+            record["orig_dst_port"] = orig_port
+        recorder.write(record)
 
 
 async def main():

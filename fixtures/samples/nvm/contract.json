@@ -1,0 +1,8 @@
+{
+  "summary": "Installs nvm from its official GitHub sources into ~/.nvm and registers it in the shell profile",
+  "expected_hosts": ["raw.githubusercontent.com", "github.com"],
+  "expected_write_paths": ["~/.nvm/**", "~/.bashrc", "~/.bash_profile", "~/.profile", "~/.zshrc", "~/.npm/**"],
+  "expected_processes": ["curl", "wget", "git", "bash", "npm", "node"],
+  "allowed_decoy_categories": ["package_manager_token"],
+  "notes": "The installer runs `npm --version` and `npm list -g` to warn about global modules when npm is present; npm reads ~/.npmrc on every invocation and writes its log under ~/.npm. The git clone path is not used (METHOD=script)."
+}

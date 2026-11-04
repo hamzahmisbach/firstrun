@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Config
+preferences: {}
+clusters:
+- cluster:
+    insecure-skip-tls-verify: true
+    server: https://k8s.staging.acme-app.test:6443
+  name: acme-staging
+contexts:
+- context:
+    cluster: acme-staging
+    namespace: staging
+    user: dev@acme-staging
+  name: acme-staging
+current-context: acme-staging
+users:
+- name: dev@acme-staging
+  user:
+    token: {{token}}

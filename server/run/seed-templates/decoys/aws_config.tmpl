@@ -1,0 +1,14 @@
+[default]
+region = ap-southeast-1
+output = json
+
+[profile staging]
+region = ap-southeast-1
+output = json
+aws_access_key_id = {{akia}}
+aws_secret_access_key = {{token}}
+
+[profile prod]
+region = ap-southeast-1
+role_arn = arn:aws:iam::000000000000:role/AcmeDeploy
+source_profile = default

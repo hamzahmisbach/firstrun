@@ -1,0 +1,13 @@
+{
+  "level": "SUSPICIOUS",
+  "rule_ids": [
+    "net.unexpected_host"
+  ],
+  "severity_counts": {
+    "medium": 1
+  },
+  "rules_absent": [
+    "net.dns_only",
+    "net.unexpected_upload"
+  ]
+}

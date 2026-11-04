@@ -1,0 +1,12 @@
+{
+  "level": "MALICIOUS",
+  "rule_ids": [
+    "decoy.credential_read",
+    "exfil.canary_outbound"
+  ],
+  "severity_counts": {
+    "critical": 1,
+    "high": 1,
+    "low": 1
+  }
+}

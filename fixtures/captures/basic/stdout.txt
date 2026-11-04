@@ -1,0 +1,13 @@
+uid=1000(dev) gid=1000(dev) groups=1000(dev)
+700 1000:1000 /home/dev
+1777 0:0 /tmp
+devbox
+rootfs is read-only
+GET 200
+POST 200
+PLAIN 200
+10.213.0.17     lookup.example.test
+tcp sent
+udp sent
+literal ip unreachable
+FRCAPTURESHIMTOKEN234567

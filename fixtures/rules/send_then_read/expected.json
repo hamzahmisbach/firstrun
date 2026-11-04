@@ -1,0 +1,15 @@
+{
+  "level": "SUSPICIOUS",
+  "rule_ids": [
+    "decoy.credential_read",
+    "net.unexpected_host",
+    "net.unexpected_upload"
+  ],
+  "severity_counts": {
+    "high": 2,
+    "medium": 1
+  },
+  "rules_absent": [
+    "exfil.read_then_send"
+  ]
+}

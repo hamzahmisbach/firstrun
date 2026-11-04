@@ -1,0 +1,12 @@
+{
+  "summary": "clones a repo over ssh",
+  "expected_hosts": [
+    "github.com"
+  ],
+  "expected_write_paths": [],
+  "expected_processes": [
+    "git"
+  ],
+  "allowed_decoy_categories": [],
+  "notes": ""
+}

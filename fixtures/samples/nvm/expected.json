@@ -1,0 +1,27 @@
+{
+  "verdict": "CLEAN",
+  "rule_ids": {
+    "exact": [],
+    "forbid": ["exfil.canary_outbound", "exfil.read_then_send", "exfil.canary_stdout", "net.unexpected_host", "net.unexpected_upload", "net.ip_literal", "net.raw_socket", "proc.exec_written_file", "run.timeout", "run.no_activity"]
+  },
+  "events": {
+    "require": [
+      { "kind": "dns.query", "name": "raw.githubusercontent.com" },
+      { "kind": "http.request", "method": "GET", "host": "raw.githubusercontent.com", "path": "/nvm-sh/nvm/v0.40.8/install.sh", "canned": true },
+      { "kind": "http.request", "method": "GET", "host": "raw.githubusercontent.com", "path": "/nvm-sh/nvm/v0.40.8/nvm.sh", "canned": true },
+      { "kind": "file.open", "path": "/home/dev/.nvm/nvm.sh", "access": "re:^(write|create)$" },
+      { "kind": "file.open", "path": "/home/dev/.bashrc", "access": "re:^(write|create)$" }
+    ],
+    "forbid": [
+      { "kind": "canary.hit" },
+      { "kind": "shim.call" },
+      { "kind": "http.request", "host": "re:^(?!raw\\.githubusercontent\\.com$)" },
+      { "kind": "tls.failed" },
+      { "kind": "file.open", "decoy_id": "re:.", "path": "re:^(?!/home/dev/\\.npmrc$)" }
+    ]
+  },
+  "alerts_min": 0,
+  "layers_min": 0,
+  "exit_code": 0,
+  "notes": "Verified in a throwaway sandbox on 2026-11-04 (8.4 s, exit 0): 4 GETs to raw.githubusercontent.com all answered from canned.json; ~/.nvm/{nvm.sh,nvm-exec,bash_completion} created, ~/.bashrc appended, ~/.npm/_logs written; the installer's `npm list -g` check opened ~/.npmrc (the only decoy touched, allowed by contract.json as package_manager_token); 24 connects, all to the sinkhole; no shim. The git clone path is never used because of METHOD=script."
+}

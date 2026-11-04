@@ -137,7 +137,7 @@ cat <<EOF
 Next (day-1 go/no-go, docs/ARCHITECTURE.md 14.2):
   G1  docker run --rm --runtime=runsc-plain ubuntu:24.04 dmesg     # should mention gVisor
   G2  sudo bash $REPO_DIR/scripts/netcheck.sh
-  G3  node --env-file=/etc/firstrun/firstrun.env $REPO_DIR/scripts/probe-vultr-inference.mjs
+  G3  sudo node --env-file=/etc/firstrun/firstrun.env $REPO_DIR/scripts/probe-vultr-inference.mjs
   G4  sudo bash $REPO_DIR/scripts/trace-selftest.sh
 Fill in /etc/firstrun/firstrun.env before G3.
 EOF

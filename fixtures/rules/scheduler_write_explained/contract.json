@@ -1,0 +1,10 @@
+{
+  "summary": "installs a user service",
+  "expected_hosts": [],
+  "expected_write_paths": [
+    "~/.config/systemd/user/**"
+  ],
+  "expected_processes": [],
+  "allowed_decoy_categories": [],
+  "notes": ""
+}

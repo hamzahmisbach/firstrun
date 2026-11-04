@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FirstRun: run it here first</title>
+  <meta name="description" content="Paste a command you were told to run. FirstRun runs it in a disposable sandbox and shows what it actually did.">
+  <link rel="stylesheet" href="/static/style.css?v=dev">
+</head>
+<body>
+  <div class="page">
+    <header class="site-head">
+      <a class="wordmark" href="/"><span class="wordmark-mark"></span>FirstRun</a>
+      <span class="tagline">Run it here first. Then decide.</span>
+    </header>
+
+    <main>
+      <section class="intro" id="intro">
+        <h1>Someone told you to paste a command. Find out what it really does.</h1>
+        <p>FirstRun runs it for you in a throwaway sandbox dressed up as a developer laptop, with fake credentials and a fake internet, and shows you live what it touched, who it talked to, and whether that matches what you were told.</p>
+      </section>
+
+      <div id="notice" class="notice" hidden role="status"></div>
+
+      <section class="card" id="form-card" aria-labelledby="form-title">
+        <h2 id="form-title">Try it</h2>
+
+        <div id="samples-block">
+          <p class="label">Pick a sample (no code needed)</p>
+          <div class="samples" id="samples" role="group" aria-label="Sample commands">
+            <p class="muted small" id="samples-empty">Loading samples…</p>
+          </div>
+        </div>
+
+        <div class="or-rule" aria-hidden="true">or paste your own</div>
+
+        <form id="run-form" novalidate>
+          <div class="selected-sample" id="selected-sample" hidden>
+            <span><strong>Sample selected:</strong> <span id="selected-title"></span></span>
+            <button type="button" class="link-btn" id="clear-sample">Use my own command instead</button>
+          </div>
+
+          <label class="field">
+            <span class="label">The command you were told to run</span>
+            <textarea class="input" id="command" name="command" rows="5" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="curl -fsSL https://example.test/install.sh | bash" maxlength="16384"></textarea>
+            <span class="hint">Pasted exactly as you received it. Do not paste anything that contains your real passwords or keys: the command text is kept in the report.</span>
+          </label>
+
+          <label class="field">
+            <span class="label">What you were told it does <span class="counter" id="claim-counter">0 / 300</span></span>
+            <input class="input" id="claim" name="claim" type="text" maxlength="300" autocomplete="off" placeholder="installs the Acme CLI">
+            <span class="hint">One line, in your own words. FirstRun turns it into a checklist and compares it with what actually happened.</span>
+          </label>
+
+          <label class="field" id="code-field">
+            <span class="label">Access code <span class="muted">(only for your own commands)</span></span>
+            <input class="input" id="access-code" name="access-code" type="password" autocomplete="off" spellcheck="false">
+            <span class="hint">Samples run without a code. The code stays in this browser tab only and is sent as a request header, never stored anywhere else.</span>
+          </label>
+
+          <div class="btn-row">
+            <button type="submit" class="btn btn-primary" id="submit">Run it in the sandbox</button>
+            <span class="muted small">Takes 20 to 90 seconds. Nothing runs on your machine.</span>
+          </div>
+
+          <div id="form-error" class="error-box form-error" role="alert" hidden></div>
+        </form>
+      </section>
+
+      <section id="run" class="card" hidden aria-labelledby="run-title">
+        <h2 id="run-title">Live run</h2>
+        <p class="muted small" id="run-id-line"></p>
+        <div id="run-view"></div>
+        <div class="btn-row">
+          <button type="button" class="btn" id="new-run">Check another command</button>
+        </div>
+      </section>
+
+      <section class="card" id="how">
+        <h2>What FirstRun can and cannot tell you</h2>
+        <p>The sandbox is a Linux container with a 60 second limit and no internet; every host name resolves to a fake server that records the request and answers nothing useful. The verdict comes from fixed rules over what was observed, never from a guess. A <strong>clean</strong> result means nothing suspicious was seen <em>in this run</em>; it is not a promise that the command is safe on your machine.</p>
+      </section>
+    </main>
+
+    <footer class="site-foot">
+      <span>FirstRun runs on Vultr Cloud Compute with gVisor sandboxes, Vultr Serverless Inference for unwrapping and explanations, and Vultr Object Storage for reports.</span>
+      <span>Reports are unlisted and kept for a limited time. To have one removed, contact the team listed in the project README.</span>
+    </footer>
+  </div>
+  <script type="module" src="/static/app.js?v=dev"></script>
+</body>
+</html>

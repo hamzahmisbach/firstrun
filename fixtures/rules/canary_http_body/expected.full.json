@@ -1,0 +1,59 @@
+{
+  "verdict": {
+    "level": "MALICIOUS",
+    "rule_ids": [
+      "decoy.credential_read",
+      "exfil.canary_outbound",
+      "net.unexpected_host",
+      "net.unexpected_upload"
+    ],
+    "coverage_notes": [
+      "This shows what happened in a Linux sandbox for up to 60 seconds with no real internet.",
+      "The internet in this sandbox is fake: every site it tried to reach was answered by FirstRun's own server with an empty reply, and nothing was forwarded."
+    ]
+  },
+  "findings": [
+    {
+      "id": "exfil.canary_outbound:4",
+      "rule_id": "exfil.canary_outbound",
+      "severity": "critical",
+      "classification": "forbidden",
+      "title": "Fake credential from ~/.aws/credentials was sent to collector.test",
+      "event_seqs": [
+        4,
+        5
+      ]
+    },
+    {
+      "id": "decoy.credential_read:1",
+      "rule_id": "decoy.credential_read",
+      "severity": "high",
+      "classification": "forbidden",
+      "title": "Opened ~/.aws/credentials (fake cloud credentials)",
+      "event_seqs": [
+        1
+      ]
+    },
+    {
+      "id": "net.unexpected_upload:4",
+      "rule_id": "net.unexpected_upload",
+      "severity": "high",
+      "classification": "unexplained",
+      "title": "Uploaded 612 bytes to collector.test",
+      "event_seqs": [
+        4
+      ]
+    },
+    {
+      "id": "net.unexpected_host:3",
+      "rule_id": "net.unexpected_host",
+      "severity": "medium",
+      "classification": "unexplained",
+      "title": "Contacted collector.test, which the claim does not mention",
+      "event_seqs": [
+        3,
+        4
+      ]
+    }
+  ]
+}

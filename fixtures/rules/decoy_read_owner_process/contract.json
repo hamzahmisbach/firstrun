@@ -1,0 +1,12 @@
+{
+  "summary": "installs a package with npm",
+  "expected_hosts": [
+    "registry.npmjs.org"
+  ],
+  "expected_write_paths": [],
+  "expected_processes": [
+    "npm"
+  ],
+  "allowed_decoy_categories": [],
+  "notes": ""
+}

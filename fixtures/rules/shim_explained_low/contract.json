@@ -1,0 +1,13 @@
+{
+  "summary": "sets up a launch agent and opens the docs",
+  "expected_hosts": [],
+  "expected_write_paths": [],
+  "expected_processes": [
+    "launchctl",
+    "defaults",
+    "gemini",
+    "xdg-open"
+  ],
+  "allowed_decoy_categories": [],
+  "notes": ""
+}

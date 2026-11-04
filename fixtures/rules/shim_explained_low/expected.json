@@ -1,0 +1,14 @@
+{
+  "level": "CLEAN",
+  "rule_ids": [],
+  "severity_counts": {
+    "low": 3,
+    "info": 1
+  },
+  "rules_present": [
+    "shim.persistence",
+    "shim.prefs",
+    "shim.ai_cli",
+    "shim.opener"
+  ]
+}

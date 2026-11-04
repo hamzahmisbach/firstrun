@@ -1,0 +1,5 @@
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":1,"ts_ms":1762250000100,"t_rel_ms":100,"source":"gvisor","kind":"proc.exec","pid":50,"ppid":7,"exe":"/usr/bin/node","argv":["node","index.js"],"cwd":"/home/dev/projects/acme-app"}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":2,"ts_ms":1762250000200,"t_rel_ms":200,"source":"gvisor","kind":"proc.exec","pid":51,"ppid":7,"exe":"/usr/bin/python3","argv":["python3","-c","print(1)"]}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":3,"ts_ms":1762250000300,"t_rel_ms":300,"source":"gvisor","kind":"proc.exec","pid":52,"ppid":7,"exe":"/usr/bin/gunzip","argv":["gunzip","x.gz"]}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":4,"ts_ms":1762250000400,"t_rel_ms":400,"source":"gvisor","kind":"proc.exec","pid":53,"ppid":7,"exe":"/usr/bin/socat","argv":["socat","-","TCP:db.test:5432"]}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":5,"ts_ms":1762250000500,"t_rel_ms":500,"source":"orchestrator","kind":"exec.finished","exit_code":0,"timed_out":false}

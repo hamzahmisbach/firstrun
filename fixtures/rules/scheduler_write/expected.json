@@ -1,0 +1,10 @@
+{
+  "level": "SUSPICIOUS",
+  "rule_ids": [
+    "fs.scheduler_write"
+  ],
+  "severity_counts": {
+    "high": 3
+  },
+  "findings_count": 3
+}

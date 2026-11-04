@@ -1,0 +1,9 @@
+{
+  "level": "SUSPICIOUS",
+  "rule_ids": [
+    "net.ip_literal"
+  ],
+  "severity_counts": {
+    "medium": 1
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "mode": "trace",
+  "gvisor_dropped": 12,
+  "decode_errors": 0,
+  "pre_t0": 3,
+  "dedup": 0,
+  "capped": {
+    "file.open": 40
+  },
+  "scan_truncated": true,
+  "oom_killed": false,
+  "timed_out": false,
+  "tls_unreadable": [],
+  "t0_seen": true
+}

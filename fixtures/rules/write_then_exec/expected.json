@@ -1,0 +1,9 @@
+{
+  "level": "SUSPICIOUS",
+  "rule_ids": [
+    "proc.exec_written_file"
+  ],
+  "severity_counts": {
+    "high": 1
+  }
+}

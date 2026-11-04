@@ -1,0 +1,10 @@
+{
+  "summary": "talks to a database host",
+  "expected_hosts": [
+    "db.example.test"
+  ],
+  "expected_write_paths": [],
+  "expected_processes": [],
+  "allowed_decoy_categories": [],
+  "notes": ""
+}

@@ -1,0 +1,10 @@
+{
+  "level": "CLEAN",
+  "rule_ids": [],
+  "severity_counts": {
+    "info": 1
+  },
+  "notes_include": [
+    "The sandbox start marker was never seen, so file and process activity inside the sandbox was not observed."
+  ]
+}

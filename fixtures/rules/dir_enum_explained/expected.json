@@ -1,0 +1,10 @@
+{
+  "level": "CLEAN",
+  "rule_ids": [],
+  "severity_counts": {
+    "info": 1
+  },
+  "rules_present": [
+    "decoy.dir_enum"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "level": "CLEAN",
+  "rule_ids": [],
+  "severity_counts": {
+    "low": 1
+  },
+  "rules_present": [
+    "unwrap.hidden_code"
+  ],
+  "notes_include": [
+    "Inner layers of the command could not be fully decoded; the verdict rests on runtime evidence only.",
+    "Because the internet here is fake, anything this command would have downloaded and run was not observed."
+  ]
+}

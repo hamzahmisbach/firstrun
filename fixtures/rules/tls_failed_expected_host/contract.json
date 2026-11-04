@@ -1,0 +1,12 @@
+{
+  "summary": "fetches a page",
+  "expected_hosts": [
+    "example.test"
+  ],
+  "expected_write_paths": [],
+  "expected_processes": [
+    "curl"
+  ],
+  "allowed_decoy_categories": [],
+  "notes": ""
+}

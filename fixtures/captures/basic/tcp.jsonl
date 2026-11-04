@@ -1,0 +1,2 @@
+{"kind":"tcp.connect","src_port":24688,"orig_dst_ip":"10.213.0.17","orig_dst_port":4444,"bytes_in":5,"first_bytes_hex":"68656c6c6f","looks_like_tls":false,"ts_ms":1793793308276}
+{"kind":"udp.datagram","src_port":46038,"orig_dst_port":9009,"len":4,"first_bytes_hex":"70696e67","ts_ms":1793793308383}

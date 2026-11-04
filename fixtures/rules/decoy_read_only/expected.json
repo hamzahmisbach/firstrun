@@ -1,0 +1,9 @@
+{
+  "level": "SUSPICIOUS",
+  "rule_ids": [
+    "decoy.credential_read"
+  ],
+  "severity_counts": {
+    "high": 1
+  }
+}

@@ -32,7 +32,8 @@ check() { # name, actual, minimum, severity
   fi
 }
 check "container/start" "$(count 1)" 1 FAIL
-check "sentry/execve" "$(count 3)" 3 FAIL
+# Two, not three: the entrypoint bash arrives as container/start, so only cat and the shim exec.
+check "sentry/execve" "$(count 3)" 2 FAIL
 check "syscall/open*" "$(count 7)" 1 FAIL
 check "syscall/connect (unverified with --network none)" "$(count 10)" 1 WARN
 check "open of /tmp/probe.txt" "$(jq -s '[.[] | select(.type == 7) | select((.msg.pathname // "") | endswith("probe.txt"))] | length' "$FILE")" 1 FAIL

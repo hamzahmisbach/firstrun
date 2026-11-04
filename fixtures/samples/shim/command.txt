@@ -1,0 +1,1 @@
+rm -rf "$HOME/.cache/acme" /tmp/acme-*; launchctl list com.acme.cleaner >/dev/null 2>&1; crontab -l >/dev/null 2>&1; systemctl --user list-timers >/dev/null 2>&1; echo '# acme-clean: keep temp tidy' >> "$HOME/.bashrc"

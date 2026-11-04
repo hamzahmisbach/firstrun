@@ -7,6 +7,7 @@ import { RUN_ID_RE } from '../run/ids.mjs';
 import { ACCESS_CODE, api, gatedLifecycle, openSse, postRun, startApp } from './helpers.mjs';
 
 const STUB_SEQUENCE = ['run.queued', 'run.started', 'exec.started', 'exec.finished', 'verdict', 'run.done'];
+const REPORT_ID = 'ABCDEFGHJKMNPQRSTVWXYZ0123';
 
 describe('POST /api/runs -> SSE -> GET /api/runs/:id (stub lifecycle)', () => {
   test('curated sample runs through run.done', async () => {
@@ -342,6 +343,135 @@ describe('GET /api/samples and /healthz', () => {
         checks: { docker: 'unchecked', sidecar: 'unchecked', sinkhole_selftest: 'unchecked', storage: 'unchecked', disk_free_mb: null },
         counters: { runs_total: 0, runs_failed: 0, rate_limited: 0, queue_rejections: 0 },
       });
+    } finally {
+      await t.close();
+    }
+  });
+
+  test('/healthz is 503 and runs are refused when a probe fails (fail closed)', async () => {
+    const health = {
+      docker: async () => 'ok',
+      sidecar: async () => 'missing',
+      selftest: () => 'ok',
+      storage: async () => 'local',
+      diskFreeMb: async () => 50_000,
+    };
+    const t = await startApp({ app: { health } });
+    try {
+      const h = await api(t.base, 'GET', '/healthz');
+      assert.equal(h.status, 503);
+      assert.equal(h.data.ok, false);
+      assert.equal(h.data.accepting_runs, false);
+      assert.equal(h.data.checks.sidecar, 'missing');
+      assert.equal(h.data.checks.storage, 'local');
+      assert.equal(h.data.checks.disk_free_mb, 50_000);
+      // The HTTP layer only refuses runs through setAccepting (main.mjs does that on a failed self-test).
+      t.app.setAccepting(false, 'self-test failed: x');
+      const r = await postRun(t.base, { sample_id: 'hello' });
+      assert.equal(r.status, 503);
+      assert.equal(r.data.error, 'runs_disabled');
+      assert.equal((await api(t.base, 'GET', '/healthz')).data.reason, 'self-test failed: x');
+    } finally {
+      await t.close();
+    }
+  });
+
+  test('disk guard: under 2 GB free, POST is 503 runs_disabled and storage reads degraded', async () => {
+    let free = 1500;
+    const health = { diskFreeMb: async () => free };
+    const t = await startApp({ app: { health } });
+    try {
+      let r = await postRun(t.base, { sample_id: 'hello' });
+      assert.equal(r.status, 503);
+      assert.equal(r.data.error, 'runs_disabled');
+      const h = await api(t.base, 'GET', '/healthz');
+      assert.equal(h.status, 200);
+      assert.equal(h.data.accepting_runs, false);
+      assert.equal(h.data.checks.storage, 'degraded');
+      free = 50_000;
+      r = await postRun(t.base, { sample_id: 'hello' });
+      assert.equal(r.status, 202);
+    } finally {
+      await t.close();
+    }
+  });
+});
+
+describe('GET /api/runs/:id from storage, /r/:id and static files', () => {
+  test('a report that is no longer in memory comes from storage; storage errors are 503', async () => {
+    const reports = new Map([[REPORT_ID, { schema_version: 1, run_id: REPORT_ID, created_at: '2026-11-04T00:00:00.000Z', verdict: { level: 'CLEAN' } }]]);
+    let broken = false;
+    const storage = {
+      async getReport(id) {
+        if (broken) throw new Error('bucket down');
+        return reports.get(id) ?? null;
+      },
+    };
+    const t = await startApp({ app: { storage } });
+    try {
+      let g = await api(t.base, 'GET', `/api/runs/${REPORT_ID}`);
+      assert.equal(g.status, 200);
+      assert.equal(g.headers.get('cache-control'), 'public, max-age=86400, immutable');
+      assert.deepEqual(g.data, { status: 'done', run_id: REPORT_ID, created_at: '2026-11-04T00:00:00.000Z', report: reports.get(REPORT_ID) });
+      g = await api(t.base, 'GET', '/api/runs/ZZZZZZZZZZZZZZZZZZZZZZZZZZ');
+      assert.equal(g.status, 404);
+      broken = true;
+      g = await api(t.base, 'GET', `/api/runs/${REPORT_ID}`);
+      assert.equal(g.status, 503);
+      assert.equal(g.data.error, 'storage_unavailable');
+      assert.equal(g.headers.get('retry-after'), '10');
+      assert.equal(JSON.stringify(t.logs).includes('bucket down'), true);
+    } finally {
+      await t.close();
+    }
+  });
+
+  test('/r/:id validates the id, sets X-Robots-Tag and uses the static handler when present', async () => {
+    const served = [];
+    const staticHandler = (req, res, pathname) => {
+      served.push(pathname);
+      if (pathname === '/static/app.js') {
+        res.writeHead(200, { 'Content-Type': 'text/javascript' });
+        res.end('// js');
+        return true;
+      }
+      if (pathname.startsWith('/r/')) {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end('<html>report shell</html>');
+        return true;
+      }
+      return false;
+    };
+    const t = await startApp({ app: { staticHandler } });
+    try {
+      let r = await api(t.base, 'GET', `/r/${REPORT_ID}`);
+      assert.equal(r.status, 200);
+      assert.equal(r.headers.get('x-robots-tag'), 'noindex');
+      assert.equal(r.text, '<html>report shell</html>');
+      r = await api(t.base, 'GET', '/r/not-an-id');
+      assert.equal(r.status, 404);
+      assert.equal(r.data.error, 'not_found');
+      r = await api(t.base, 'GET', '/static/app.js');
+      assert.equal(r.status, 200);
+      assert.equal(r.text, '// js');
+      r = await api(t.base, 'GET', '/static/missing.css');
+      assert.equal(r.status, 404, 'static handler declined -> router 404');
+      r = await api(t.base, 'POST', '/r/' + REPORT_ID, { json: {} });
+      assert.equal(r.status, 404, 'only GET/HEAD reach the static layer');
+      assert.deepEqual(served, [`/r/${REPORT_ID}`, '/static/app.js', '/static/missing.css']);
+    } finally {
+      await t.close();
+    }
+  });
+
+  test('/r/:id without a static handler serves a placeholder page', async () => {
+    const t = await startApp();
+    try {
+      const r = await api(t.base, 'GET', `/r/${REPORT_ID}`);
+      assert.equal(r.status, 200);
+      assert.match(r.headers.get('content-type'), /^text\/html/);
+      assert.equal(r.headers.get('x-robots-tag'), 'noindex');
+      assert.ok(r.text.includes(`/api/runs/${REPORT_ID}`));
     } finally {
       await t.close();
     }

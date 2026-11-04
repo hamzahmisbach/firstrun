@@ -1,0 +1,23 @@
+{
+  "verdict": "MALICIOUS",
+  "rule_ids": {
+    "require": ["decoy.credential_read", "exfil.canary_outbound"],
+    "forbid": ["shim.credential_prompt", "shim.privilege", "run.timeout", "run.no_activity"]
+  },
+  "events": {
+    "require": [
+      { "kind": "file.open", "decoy_id": "aws_secret", "access": "read" },
+      { "kind": "dns.query", "name": "updates.acme-cli.test" },
+      { "kind": "http.request", "method": "POST", "host": "updates.acme-cli.test", "path": "/v1/check", "body_len": "re:^[1-9][0-9]*$" },
+      { "kind": "canary.hit", "decoy_id": "aws_secret", "form": "raw", "where": "re:body" }
+    ],
+    "forbid": [
+      { "kind": "shim.call" },
+      { "kind": "canary.hit", "decoy_id": "re:^(?!aws_secret$)" }
+    ]
+  },
+  "alerts_min": 1,
+  "layers_min": 1,
+  "exit_code": 0,
+  "notes": "Verified in a throwaway sandbox on 2026-11-04: curl opened /home/dev/.aws/credentials (O_RDONLY) and the sinkhole recorded one POST to updates.acme-cli.test with the raw token in the body; no shim execs. net.unexpected_host and net.unexpected_upload are not required because the claim-to-contract model may list the host it sees in the command; exfil.canary_outbound is forbidden regardless of the contract (9.1)."
+}

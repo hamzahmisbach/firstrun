@@ -1,0 +1,14 @@
+{
+  "level": "CLEAN",
+  "rule_ids": [],
+  "severity_counts": {
+    "info": 3,
+    "low": 1
+  },
+  "rules_present": [
+    "proc.interpreter",
+    "proc.interpreter_inline",
+    "proc.net_tool",
+    "proc.decode_helper"
+  ]
+}

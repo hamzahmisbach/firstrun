@@ -42,16 +42,64 @@ test('loadConfig: rejects bad values without echoing them', () => {
     FIRSTRUN_FREEFORM: ['yes', 'true'],
     FIRSTRUN_KILL_SWITCH: ['on'],
     FIRSTRUN_ACCESS_CODE: ['short-secret-value'],
+    FIRSTRUN_EVIDENCE: ['ptrace', 'strace'],
+    FIRSTRUN_LLM_DISABLED: ['true'],
+    FIRSTRUN_S3_ENDPOINT: ['http://sgp1.vultrobjects.com'],
+    FIRSTRUN_REPORT_TTL_DAYS: ['0', 'many'],
+    VULTR_INFERENCE_API_KEY: ['short'],
   };
   for (const [name, values] of Object.entries(cases)) {
     for (const value of values) {
       assert.throws(
         () => loadConfig({ [name]: value }),
-        (err) => err.message.includes(name) && (name !== 'FIRSTRUN_ACCESS_CODE' || !err.message.includes(value)),
+        (err) => err.message.includes(name) && (!/CODE|KEY/.test(name) || !err.message.includes(value)),
         `${name}=${value}`,
       );
     }
   }
+  assert.throws(() => loadConfig({ FIRSTRUN_EVIDENCE: 'strace' }), /strace fallback is not implemented/);
+});
+
+test('loadConfig: engine variables (storage, trace, inference)', () => {
+  const base = loadConfig({});
+  assert.equal(base.traceDir, path.resolve('/srv/firstrun/trace'));
+  assert.equal(base.spoolDir, path.resolve('/srv/firstrun/spool'));
+  assert.equal(base.sinkSocket, path.resolve('/run/firstrun/gvisor-sink.sock'));
+  assert.equal(base.evidence, 'trace');
+  assert.equal(base.llmDisabled, false);
+  assert.equal(base.s3, null, 'no credentials = local spool mode');
+  assert.equal(base.reportTtlDays, 30);
+  assert.deepEqual(base.inference, { apiKey: null, baseUrl: 'https://api.vultrinference.com/v1' });
+  assert.ok(base.webDir.endsWith('web'), base.webDir);
+
+  // All four S3 variables or none.
+  assert.throws(() => loadConfig({ FIRSTRUN_S3_ENDPOINT: 'https://sgp1.vultrobjects.com' }), /FIRSTRUN_S3_\*/);
+  const s3 = loadConfig({
+    FIRSTRUN_S3_ENDPOINT: 'https://sgp1.vultrobjects.com',
+    FIRSTRUN_S3_BUCKET: 'firstrun-reports-abc123',
+    FIRSTRUN_S3_ACCESS_KEY: 'AK',
+    FIRSTRUN_S3_SECRET_KEY: 'SK',
+    FIRSTRUN_REPORT_TTL_DAYS: '7',
+    VULTR_INFERENCE_API_KEY: 'k'.repeat(32),
+    VULTR_INFERENCE_BASE_URL: 'https://api.vultrinference.com/v1/',
+    FIRSTRUN_LLM_DISABLED: '1',
+  });
+  assert.deepEqual(s3.s3, { endpoint: 'https://sgp1.vultrobjects.com', bucket: 'firstrun-reports-abc123', accessKey: 'AK', secretKey: 'SK' });
+  assert.equal(s3.reportTtlDays, 7);
+  assert.equal(s3.inference.apiKey, 'k'.repeat(32));
+  assert.equal(s3.inference.baseUrl, 'https://api.vultrinference.com/v1');
+  assert.equal(s3.llmDisabled, true);
+});
+
+test('LIMITS: engine numbers', () => {
+  assert.equal(LIMITS.sandbox.execTimeoutS, 60);
+  assert.equal(LIMITS.sandbox.watchdogS, 75);
+  assert.equal(LIMITS.sandbox.sinkholeReadyMs, 15_000, 'measured 3.9-5.6 s on the VM');
+  assert.equal(LIMITS.sandbox.pidsLimit, 256);
+  assert.equal(LIMITS.output.streamMaxBytes, 1024 * 1024);
+  assert.equal(LIMITS.output.previewMaxBytes, 32 * 1024);
+  assert.equal(LIMITS.janitor.orphanAgeMs, 600_000);
+  assert.equal(LIMITS.disk.minFreeBytes, 2 * 1024 * 1024 * 1024);
 });
 
 test('LIMITS: section 11 numbers live in config.mjs and are frozen', () => {

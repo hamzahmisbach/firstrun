@@ -1,0 +1,12 @@
+{
+  "level": "SUSPICIOUS",
+  "rule_ids": [
+    "shim.persistence"
+  ],
+  "severity_counts": {
+    "high": 1
+  },
+  "notes_include": [
+    "OS-specific tools (crontab) were recorded, not executed; behaviour on a real macOS/Windows machine may differ."
+  ]
+}

@@ -1,0 +1,1 @@
+/work/cmd.sh: line 5: /usr/local/blocked.txt: Permission denied

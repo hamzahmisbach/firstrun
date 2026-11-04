@@ -11,6 +11,7 @@ const MiB = 1024 * KiB;
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
 const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
 
 export const VERSION = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
 
@@ -66,7 +67,7 @@ export const LIMITS = deepFreeze({
     maxPendingBytes: 8 * MiB, // a client this far behind is disconnected (it can resume via Last-Event-ID)
   },
   runs: {
-    retainAfterEndMs: HOUR, // in-memory run state (and day-1 report) after the run ends
+    retainAfterEndMs: HOUR, // in-memory run state after the run ends (reports also live in storage)
     maxFinished: 200,
     sweepEveryMs: MINUTE,
   },
@@ -76,16 +77,38 @@ export const LIMITS = deepFreeze({
     storageUnavailable: 10,
   },
   sandbox: {
-    execTimeoutS: 60,
-    watchdogS: 75,
+    execTimeoutS: 60, // `timeout -s KILL` inside the container (sandbox/launch)
+    watchdogS: 75, // `docker kill` from outside
+    unwrapTimeoutS: 20, // harness containers (5.1, unwrap variant)
+    unwrapWatchdogS: 30,
     memoryMb: 512,
     cpus: 1,
-    pidsLimit: 128,
+    // The plan says 128, but the cgroup counts the sentry and systrap helper threads as well as the
+    // sandboxed processes: with 128 a loop of background `sleep`s died at about 42 concurrent
+    // processes (measured on the VM). Installers like npm and pip fork far more than that, so 256
+    // leaves roughly 100 real processes while a fork bomb still hits the wall long before the host
+    // does; the memory cap and the 60 s wall clock remain the real backstop.
+    pidsLimit: 256,
+    nofile: 1024,
+    fsizeBytes: 104857600,
+    sinkhole: { memoryMb: 256, cpus: 0.5, pidsLimit: 64 },
+    sinkholeReadyMs: 15 * SECOND, // network + sinkhole took 3.9-5.6 s on the VM; the plan's 5 s was too tight
+    cidfileWaitMs: 10 * SECOND,
+    evidenceGraceMs: 1500, // after exit: let the sidecar and sinkhole tails drain
+    dockerCommandTimeoutMs: 30 * SECOND, // every short docker command (create, inspect, rm, kill, ps)
+    // Exit 137 alone is not a timeout (OOM kill and self-inflicted SIGKILL look the same): a run
+    // timed out only when the watchdog fired, `timeout` returned 124, or it ran this close to the limit.
+    timeoutSlackMs: 2 * SECOND,
+  },
+  llm: {
+    contractWaitMs: 20 * SECOND, // how long step 11 waits for claim-to-contract before the fallback (8.1)
   },
   unwrap: {
     maxLayers: 5,
     retriesPerLayer: 3,
-    budgetMs: 120 * SECOND,
+    budgetMs: 45 * SECOND, // the user is watching; was 120 s in the plan, cut 2026-11-04 after real runs
+    harnessStdoutMaxBytes: 256 * KiB,
+    harnessStderrMaxBytes: 16 * KiB,
   },
   output: {
     streamMaxBytes: 1 * MiB, // stdout / stderr captured from the sandbox
@@ -95,6 +118,26 @@ export const LIMITS = deepFreeze({
     reportMaxBytes: 4 * MiB,
     sinkholeBodyMaxBytes: 2 * MiB, // mitmproxy body_size_limit
   },
+  storage: {
+    cacheMaxReports: 200,
+    cacheTtlMs: HOUR,
+    headBucketCacheMs: 5 * MINUTE,
+    spoolRetryEveryMs: MINUTE,
+    spoolMaxAgeMs: DAY, // a report that could not be uploaded for a day is dropped from the spool (S3 mode only)
+    retentionEveryMs: DAY,
+  },
+  janitor: {
+    sweepEveryMs: MINUTE,
+    orphanAgeMs: 10 * MINUTE, // containers, networks, trace files and run dirs left behind by a crash
+    failedRunKeepMs: DAY, // sinkhole/ of a failed run is kept (0700) this long for debugging
+  },
+  health: {
+    dockerCacheMs: 30 * SECOND,
+    diskCacheMs: 10 * SECOND,
+    sidecarHeartbeatMaxAgeMs: 60 * SECOND,
+    sidecarWaitMs: 10 * SECOND, // at startup
+    selfcheckTimeoutMs: 90 * SECOND,
+  },
   disk: {
     minFreeBytes: 2 * 1024 * MiB, // below this POST /api/runs answers 503 runs_disabled
   },
@@ -102,42 +145,75 @@ export const LIMITS = deepFreeze({
 });
 
 const DEFAULT_SAMPLES_DIR = fileURLToPath(new URL('../fixtures/samples/', import.meta.url));
+const DEFAULT_WEB_DIR = fileURLToPath(new URL('../web/', import.meta.url));
 const LISTEN_RE = /^(?:\[([0-9a-fA-F:.]+)\]|([^:\s[\]]+)):(\d{1,5})$/;
 const flag = (fallback) => z.enum(['0', '1']).default(fallback).transform((v) => v === '1');
 const filePath = (fallback) => z.string().default(fallback).transform((p) => path.resolve(p));
+const S3_KEYS = ['FIRSTRUN_S3_ENDPOINT', 'FIRSTRUN_S3_BUCKET', 'FIRSTRUN_S3_ACCESS_KEY', 'FIRSTRUN_S3_SECRET_KEY'];
 
-const EnvSchema = z.object({
-  FIRSTRUN_LISTEN: z
-    .string()
-    .regex(LISTEN_RE, 'expected host:port, e.g. 127.0.0.1:3000')
-    .default('127.0.0.1:3000')
-    .transform((value) => {
-      const m = LISTEN_RE.exec(value);
-      return { host: m[1] ?? m[2], port: Number(m[3]) };
-    })
-    .refine((l) => l.port <= 65535, 'port must be 0..65535'),
-  FIRSTRUN_PUBLIC_URL: z
-    .url({ protocol: /^https?$/, error: 'expected an http(s) URL, e.g. https://firstrun.example.org' })
-    .transform((u) => u.replace(/\/+$/, ''))
-    .optional(),
-  FIRSTRUN_ACCESS_CODE: z
-    .string()
-    .min(LIMITS.input.accessCodeMinChars, `must be at least ${LIMITS.input.accessCodeMinChars} characters`)
-    .optional(),
-  FIRSTRUN_FREEFORM: flag('1'),
-  FIRSTRUN_KILL_SWITCH: flag('0'),
-  FIRSTRUN_KILL_SWITCH_FILE: filePath('/srv/firstrun/KILL_SWITCH'),
-  FIRSTRUN_RUNS_DIR: filePath('/srv/firstrun/runs'),
-  FIRSTRUN_SAMPLES_DIR: filePath(DEFAULT_SAMPLES_DIR),
-});
+const EnvSchema = z
+  .object({
+    FIRSTRUN_LISTEN: z
+      .string()
+      .regex(LISTEN_RE, 'expected host:port, e.g. 127.0.0.1:3000')
+      .default('127.0.0.1:3000')
+      .transform((value) => {
+        const m = LISTEN_RE.exec(value);
+        return { host: m[1] ?? m[2], port: Number(m[3]) };
+      })
+      .refine((l) => l.port <= 65535, 'port must be 0..65535'),
+    FIRSTRUN_PUBLIC_URL: z
+      .url({ protocol: /^https?$/, error: 'expected an http(s) URL, e.g. https://firstrun.example.org' })
+      .transform((u) => u.replace(/\/+$/, ''))
+      .optional(),
+    FIRSTRUN_ACCESS_CODE: z
+      .string()
+      .min(LIMITS.input.accessCodeMinChars, `must be at least ${LIMITS.input.accessCodeMinChars} characters`)
+      .optional(),
+    FIRSTRUN_FREEFORM: flag('1'),
+    FIRSTRUN_KILL_SWITCH: flag('0'),
+    FIRSTRUN_KILL_SWITCH_FILE: filePath('/srv/firstrun/KILL_SWITCH'),
+    FIRSTRUN_RUNS_DIR: filePath('/srv/firstrun/runs'),
+    FIRSTRUN_TRACE_DIR: filePath('/srv/firstrun/trace'),
+    FIRSTRUN_SPOOL_DIR: filePath('/srv/firstrun/spool'),
+    FIRSTRUN_SINK_SOCKET: filePath('/run/firstrun/gvisor-sink.sock'),
+    FIRSTRUN_SAMPLES_DIR: filePath(DEFAULT_SAMPLES_DIR),
+    FIRSTRUN_WEB_DIR: filePath(DEFAULT_WEB_DIR),
+    // The strace fallback (7.5) was never built: the go/no-go on gVisor trace points passed.
+    FIRSTRUN_EVIDENCE: z
+      .enum(['trace', 'strace'], { error: 'expected trace' })
+      .default('trace')
+      .refine((v) => v !== 'strace', 'the strace fallback is not implemented (docs/ARCHITECTURE.md 7.5); use trace'),
+    FIRSTRUN_LLM_DISABLED: flag('0'),
+    FIRSTRUN_S3_ENDPOINT: z.url({ protocol: /^https$/, error: 'expected an https URL, e.g. https://sgp1.vultrobjects.com' }).optional(),
+    FIRSTRUN_S3_BUCKET: z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/, 'expected an S3 bucket name').optional(),
+    FIRSTRUN_S3_ACCESS_KEY: z.string().min(1).optional(),
+    FIRSTRUN_S3_SECRET_KEY: z.string().min(1).optional(),
+    FIRSTRUN_REPORT_TTL_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
+    VULTR_INFERENCE_API_KEY: z.string().min(8, 'must be at least 8 characters').optional(),
+    VULTR_INFERENCE_BASE_URL: z
+      .url({ protocol: /^https$/, error: 'expected an https URL' })
+      .default('https://api.vultrinference.com/v1')
+      .transform((u) => u.replace(/\/+$/, '')),
+    // Development only: a directory whose files shadow server/ modules (stand-ins for modules that
+    // other people are still writing). Never set in production.
+    FIRSTRUN_DEV_MODULES_DIR: z.string().transform((p) => path.resolve(p)).optional(),
+  })
+  .refine(
+    (e) => {
+      const set = S3_KEYS.filter((k) => e[k] !== undefined).length;
+      return set === 0 || set === S3_KEYS.length;
+    },
+    { message: `set all of ${S3_KEYS.join(', ')} or none (local spool mode)`, path: ['FIRSTRUN_S3_*'] },
+  );
 
 /**
- * Parse FIRSTRUN_* env vars. Empty values count as unset. Throws with the variable names and
- * problems, never the values (FIRSTRUN_ACCESS_CODE is a secret).
+ * Parse FIRSTRUN_* and VULTR_* env vars. Empty values count as unset. Throws with the variable
+ * names and problems, never the values (several of them are secrets).
  */
 export function loadConfig(env = process.env) {
   const picked = Object.fromEntries(
-    Object.entries(env).filter(([key, value]) => key.startsWith('FIRSTRUN_') && value !== ''),
+    Object.entries(env).filter(([key, value]) => (key.startsWith('FIRSTRUN_') || key.startsWith('VULTR_')) && value !== ''),
   );
   const parsed = EnvSchema.safeParse(picked);
   if (!parsed.success) {
@@ -156,6 +232,25 @@ export function loadConfig(env = process.env) {
     killSwitch: e.FIRSTRUN_KILL_SWITCH,
     killSwitchFile: e.FIRSTRUN_KILL_SWITCH_FILE,
     runsDir: e.FIRSTRUN_RUNS_DIR,
+    traceDir: e.FIRSTRUN_TRACE_DIR,
+    spoolDir: e.FIRSTRUN_SPOOL_DIR,
+    sinkSocket: e.FIRSTRUN_SINK_SOCKET,
     samplesDir: e.FIRSTRUN_SAMPLES_DIR,
+    webDir: e.FIRSTRUN_WEB_DIR,
+    evidence: e.FIRSTRUN_EVIDENCE,
+    llmDisabled: e.FIRSTRUN_LLM_DISABLED,
+    // null = no Object Storage credentials: reports stay in the local spool (10.4), runs still work.
+    s3:
+      e.FIRSTRUN_S3_ENDPOINT === undefined
+        ? null
+        : {
+            endpoint: e.FIRSTRUN_S3_ENDPOINT,
+            bucket: e.FIRSTRUN_S3_BUCKET,
+            accessKey: e.FIRSTRUN_S3_ACCESS_KEY,
+            secretKey: e.FIRSTRUN_S3_SECRET_KEY,
+          },
+    reportTtlDays: e.FIRSTRUN_REPORT_TTL_DAYS,
+    inference: { apiKey: e.VULTR_INFERENCE_API_KEY ?? null, baseUrl: e.VULTR_INFERENCE_BASE_URL },
+    devModulesDir: e.FIRSTRUN_DEV_MODULES_DIR ?? null,
   };
 }

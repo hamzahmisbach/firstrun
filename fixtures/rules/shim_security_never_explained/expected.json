@@ -1,0 +1,9 @@
+{
+  "level": "SUSPICIOUS",
+  "rule_ids": [
+    "shim.credential_prompt"
+  ],
+  "severity_counts": {
+    "high": 1
+  }
+}

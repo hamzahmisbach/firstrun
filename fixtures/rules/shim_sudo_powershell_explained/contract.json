@@ -1,0 +1,11 @@
+{
+  "summary": "installs with sudo and powershell",
+  "expected_hosts": [],
+  "expected_write_paths": [],
+  "expected_processes": [
+    "sudo",
+    "powershell.exe"
+  ],
+  "allowed_decoy_categories": [],
+  "notes": ""
+}

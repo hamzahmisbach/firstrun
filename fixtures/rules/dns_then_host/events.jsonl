@@ -1,0 +1,5 @@
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":1,"ts_ms":1762250000100,"t_rel_ms":100,"source":"sinkhole","kind":"dns.query","name":"cdn.example.test","qtype":"A","ts_src":"arrival"}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":2,"ts_ms":1762250000200,"t_rel_ms":200,"source":"sinkhole","kind":"tls.clienthello","sni":"cdn.example.test","port":443,"alpn":["h2","http/1.1"]}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":3,"ts_ms":1762250000300,"t_rel_ms":300,"source":"sinkhole","kind":"http.request","method":"GET","host":"cdn.example.test","port":443,"path":"/x","body_len":0,"scheme":"https","status":200,"canned":false}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":4,"ts_ms":1762250000400,"t_rel_ms":400,"source":"sinkhole","kind":"dns.query","name":"8.0.113.203.in-addr.arpa","qtype":"A","ts_src":"arrival"}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":5,"ts_ms":1762250000500,"t_rel_ms":500,"source":"orchestrator","kind":"exec.finished","exit_code":0,"timed_out":false}

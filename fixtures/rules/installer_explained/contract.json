@@ -1,0 +1,21 @@
+{
+  "summary": "Installs nvm from GitHub and adds it to the shell startup files",
+  "expected_hosts": [
+    "raw.githubusercontent.com",
+    "github.com"
+  ],
+  "expected_write_paths": [
+    "~/.nvm/**",
+    "~/.bashrc",
+    "~/.zshrc",
+    "~/.profile",
+    "~/.bash_profile"
+  ],
+  "expected_processes": [
+    "git",
+    "curl",
+    "wget"
+  ],
+  "allowed_decoy_categories": [],
+  "notes": ""
+}

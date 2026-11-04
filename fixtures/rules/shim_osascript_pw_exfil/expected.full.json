@@ -1,0 +1,60 @@
+{
+  "verdict": {
+    "level": "MALICIOUS",
+    "rule_ids": [
+      "exfil.canary_outbound",
+      "net.unexpected_host",
+      "net.unexpected_upload",
+      "shim.credential_prompt"
+    ],
+    "coverage_notes": [
+      "This shows what happened in a Linux sandbox for up to 60 seconds with no real internet.",
+      "The internet in this sandbox is fake: every site it tried to reach was answered by FirstRun's own server with an empty reply, and nothing was forwarded.",
+      "OS-specific tools (osascript) were recorded, not executed; behaviour on a real macOS/Windows machine may differ."
+    ]
+  },
+  "findings": [
+    {
+      "id": "exfil.canary_outbound:3",
+      "rule_id": "exfil.canary_outbound",
+      "severity": "critical",
+      "classification": "forbidden",
+      "title": "Fake password typed into a prompt was sent to collector.test",
+      "event_seqs": [
+        3,
+        4
+      ]
+    },
+    {
+      "id": "shim.credential_prompt:1",
+      "rule_id": "shim.credential_prompt",
+      "severity": "high",
+      "classification": "unexplained",
+      "title": "Called osascript, a tool that can show password prompts or read the keychain (osascript -e display dialog \"Password:\" default answer \"\" with hidden answer)",
+      "event_seqs": [
+        1
+      ]
+    },
+    {
+      "id": "net.unexpected_upload:3",
+      "rule_id": "net.unexpected_upload",
+      "severity": "high",
+      "classification": "unexplained",
+      "title": "Uploaded 64 bytes to collector.test",
+      "event_seqs": [
+        3
+      ]
+    },
+    {
+      "id": "net.unexpected_host:2",
+      "rule_id": "net.unexpected_host",
+      "severity": "medium",
+      "classification": "unexplained",
+      "title": "Contacted collector.test, which the claim does not mention",
+      "event_seqs": [
+        2,
+        3
+      ]
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+2026-10-29T08:12:44.102Z INFO  acme-api listening port=3000
+2026-10-29T08:12:51.880Z INFO  GET /healthz 200 3ms
+2026-10-29T08:13:02.417Z INFO  POST /auth/login 200 41ms user=4821
+2026-10-29T08:13:02.902Z WARN  stripe webhook signature mismatch id=evt_1QFx2a attempt=2
+2026-10-29T08:13:09.331Z INFO  GET /healthz 200 2ms
+2026-10-29T08:14:17.005Z ERROR pg pool error: connection terminated unexpectedly
+2026-10-29T08:14:17.210Z INFO  pg pool reconnected
+2026-10-29T08:15:00.000Z INFO  cron: cleanup_sessions removed=137

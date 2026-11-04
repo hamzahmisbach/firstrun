@@ -1,0 +1,16 @@
+{
+  "level": "SUSPICIOUS",
+  "rule_ids": [
+    "run.timeout"
+  ],
+  "severity_counts": {
+    "medium": 1,
+    "info": 1
+  },
+  "rules_absent": [
+    "run.oom"
+  ],
+  "notes_include": [
+    "The command did not finish within 60 s; later behaviour was not observed."
+  ]
+}

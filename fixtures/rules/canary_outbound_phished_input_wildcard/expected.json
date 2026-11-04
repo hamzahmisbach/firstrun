@@ -1,0 +1,12 @@
+{
+  "level": "MALICIOUS",
+  "rule_ids": [
+    "exfil.canary_outbound"
+  ],
+  "severity_counts": {
+    "critical": 1
+  },
+  "rules_absent": [
+    "net.unexpected_host"
+  ]
+}

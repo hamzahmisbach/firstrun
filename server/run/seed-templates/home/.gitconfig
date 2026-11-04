@@ -1,0 +1,27 @@
+[user]
+	name = Dev Pratama
+	email = dev.pratama@acme-app.test
+	signingkey = ~/.ssh/id_ed25519.pub
+[core]
+	editor = vim
+	autocrlf = input
+	excludesfile = ~/.gitignore_global
+[init]
+	defaultBranch = main
+[pull]
+	rebase = true
+[push]
+	autoSetupRemote = true
+[gpg]
+	format = ssh
+[commit]
+	gpgsign = false
+[alias]
+	co = checkout
+	st = status -sb
+	lg = log --oneline --graph --decorate
+	amend = commit --amend --no-edit
+[color]
+	ui = auto
+[diff]
+	colorMoved = default

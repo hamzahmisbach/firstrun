@@ -1,0 +1,3 @@
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":1,"ts_ms":1762250000100,"t_rel_ms":100,"source":"gvisor","kind":"file.open","pid":60,"path":"/home/dev/.config/Exodus/exodus.wallet/seed.seco","access":"read","decoy_id":"wallet_seed"}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":2,"ts_ms":1762250000200,"t_rel_ms":200,"source":"sinkhole","kind":"tcp.connect","orig_dst_port":4444,"bytes_in":2048,"looks_like_tls":false}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":3,"ts_ms":1762250000300,"t_rel_ms":300,"source":"orchestrator","kind":"exec.finished","exit_code":0,"timed_out":false}

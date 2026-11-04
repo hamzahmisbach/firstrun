@@ -1,0 +1,8 @@
+{
+  "summary": "installs nvm",
+  "expected_hosts": [],
+  "expected_write_paths": [],
+  "expected_processes": [],
+  "allowed_decoy_categories": [],
+  "notes": "Contract could not be generated; only the sandbox baseline (tmp and cache) is treated as expected."
+}

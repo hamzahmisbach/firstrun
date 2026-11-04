@@ -1,0 +1,13 @@
+{
+  "level": "CLEAN",
+  "rule_ids": [],
+  "severity_counts": {
+    "info": 1
+  },
+  "rules_present": [
+    "net.tls_opaque"
+  ],
+  "notes_include": [
+    "TLS to example.test could not be inspected (client rejected the test CA); the destination is proven, the content is not."
+  ]
+}

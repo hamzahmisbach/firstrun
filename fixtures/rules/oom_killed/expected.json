@@ -1,0 +1,16 @@
+{
+  "level": "SUSPICIOUS",
+  "rule_ids": [
+    "run.oom"
+  ],
+  "severity_counts": {
+    "medium": 1,
+    "low": 1
+  },
+  "rules_absent": [
+    "run.timeout"
+  ],
+  "notes_include": [
+    "The command used more memory than the sandbox allows and was stopped, so the rest of the command did not run."
+  ]
+}

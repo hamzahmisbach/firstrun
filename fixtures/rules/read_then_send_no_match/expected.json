@@ -1,0 +1,13 @@
+{
+  "level": "MALICIOUS",
+  "rule_ids": [
+    "decoy.credential_read",
+    "exfil.read_then_send",
+    "net.raw_socket"
+  ],
+  "severity_counts": {
+    "critical": 1,
+    "high": 1,
+    "medium": 1
+  }
+}

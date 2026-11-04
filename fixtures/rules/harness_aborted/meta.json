@@ -1,0 +1,8 @@
+{
+  "unwrap": {
+    "stopped": "needs_harness",
+    "harness": {
+      "stoppedReason": "aborted"
+    }
+  }
+}

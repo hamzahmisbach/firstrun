@@ -1,0 +1,9 @@
+{
+  "level": "CLEAN",
+  "rule_ids": [],
+  "severity_counts": {},
+  "notes_include": [
+    "Evidence is incomplete: 12 trace records were lost and 40 events were cut by the per-run cap; some file, process or network activity may be missing from this report.",
+    "Not all network traffic could be scanned for the fake credentials; a leak may have gone unnoticed."
+  ]
+}

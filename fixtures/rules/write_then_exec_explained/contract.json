@@ -1,0 +1,12 @@
+{
+  "summary": "downloads and runs the installer",
+  "expected_hosts": [],
+  "expected_write_paths": [
+    "/tmp/**"
+  ],
+  "expected_processes": [
+    "installer"
+  ],
+  "allowed_decoy_categories": [],
+  "notes": ""
+}

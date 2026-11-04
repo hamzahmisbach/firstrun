@@ -1,0 +1,8 @@
+{
+  "level": "CLEAN",
+  "rule_ids": [],
+  "severity_counts": {},
+  "rules_absent": [
+    "net.ip_literal"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "level": "SUSPICIOUS",
+  "rule_ids": [
+    "proc.net_tool"
+  ],
+  "severity_counts": {
+    "medium": 1,
+    "low": 2
+  },
+  "rules_present": [
+    "proc.interpreter",
+    "proc.decode_helper"
+  ]
+}

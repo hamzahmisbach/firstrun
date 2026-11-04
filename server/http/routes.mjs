@@ -1,17 +1,18 @@
 // HTTP API (section 10.1): POST /api/runs, GET /api/runs/:id, GET /api/runs/:id/events,
-// GET /api/samples, GET /healthz. createApp() wires router, rate limits, queue, SSE and lifecycle.
+// GET /api/samples, GET /healthz, GET /r/:id and the static files. createApp() wires router, rate
+// limits, queue, SSE, storage and the lifecycle.
 // Logging rule (section 11): never log command text, claim, or access code; only sizes and sha256.
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { access, readdir, readFile, stat } from 'node:fs/promises';
+import { access, readdir, readFile, stat, statfs } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { LIMITS, SAMPLE_ID_RE, VERSION } from '../config.mjs';
 import { RUN_ID_RE, newRunId } from '../run/ids.mjs';
-import { RunError, createStubLifecycle } from '../run/lifecycle.mjs';
+import { RunError } from '../run/lifecycle.mjs';
 import { RunQueue } from '../run/queue.mjs';
 import { RunRegistry } from '../run/registry.mjs';
 import { RateLimiter } from './ratelimit.mjs';
-import { HttpError, createRouter } from './router.mjs';
+import { HttpError, createRouter, sendJson } from './router.mjs';
 import { SseHubs } from './sse.mjs';
 
 // ---------------------------------------------------------------------------------------------
@@ -170,21 +171,87 @@ export async function loadSamples(dir, log = () => {}) {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Health probes (section 10.1 /healthz, 11 "Monitoring dasar")
+
+const UNCHECKED = Object.freeze({
+  docker: async () => 'unchecked',
+  sidecar: async () => 'unchecked',
+  selftest: () => 'unchecked',
+  storage: async () => 'unchecked',
+  diskFreeMb: async () => null,
+});
+
+/**
+ * Real probes for main.mjs: `docker version` cached 30 s, sidecar socket + heartbeat file younger
+ * than 60 s, the startup self-test result, storage check (HeadBucket cached 5 min, or "local"),
+ * and free space under the runs dir cached 10 s.
+ */
+export function createHealthProbes({ config, docker, storage, now = Date.now }) {
+  let dockerCache = { at: 0, value: null };
+  let diskCache = { at: 0, value: null };
+  const selfTest = { status: 'pending', detail: null };
+  return {
+    selfTest,
+    async docker() {
+      if (now() - dockerCache.at < LIMITS.health.dockerCacheMs && dockerCache.value) return dockerCache.value;
+      let value = 'ok';
+      try {
+        await docker.version();
+      } catch {
+        value = 'failed';
+      }
+      dockerCache = { at: now(), value };
+      return value;
+    },
+    async sidecar() {
+      try {
+        const s = await stat(config.sinkSocket);
+        if (!s.isSocket()) return 'missing';
+      } catch {
+        return 'missing';
+      }
+      try {
+        const h = await stat(`${config.sinkSocket}.heartbeat`);
+        return now() - h.mtimeMs <= LIMITS.health.sidecarHeartbeatMaxAgeMs ? 'ok' : 'stale';
+      } catch {
+        return 'stale';
+      }
+    },
+    selftest: () => selfTest.status,
+    storage: () => storage.check(),
+    async diskFreeMb() {
+      if (now() - diskCache.at < LIMITS.health.diskCacheMs && diskCache.value !== null) return diskCache.value;
+      try {
+        const fs = await statfs(config.runsDir);
+        diskCache = { at: now(), value: Math.floor((Number(fs.bavail) * Number(fs.bsize)) / (1024 * 1024)) };
+      } catch {
+        diskCache = { at: now(), value: null };
+      }
+      return diskCache.value;
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
 // Application
 
 const sha256hex = (text) => createHash('sha256').update(text, 'utf8').digest('hex');
+const REPORT_PATH_RE = /^\/r\/([^/]+)$/;
 
 /**
  * @param {ReturnType<typeof import('../config.mjs').loadConfig>} config
- * @param {object} [opts]
+ * @param {object} opts
+ * @param {(run: object, ctx: object) => Promise<void>} opts.lifecycle  run/lifecycle.mjs (tests inject fakes)
  * @param {(record: object) => void} [opts.log]  one JSON line per record (main.mjs)
- * @param {(run: object, ctx: object) => Promise<void>} [opts.lifecycle]  default: day-1 stub
- * @param {{stepMs?: number}} [opts.stub]
+ * @param {object} [opts.storage]  storage/index.mjs; GET /api/runs/:id falls back to it
+ * @param {object} [opts.health]  createHealthProbes(); default: everything "unchecked"
+ * @param {(req, res, pathname: string) => boolean} [opts.staticHandler]  http/static.mjs
  * @param {object} [opts.sse]  overrides for LIMITS.sse (tests)
  * @param {object} [opts.runs]  overrides for LIMITS.runs (tests)
  * @param {() => number} [opts.now]
  */
 export async function createApp(config, opts = {}) {
+  if (typeof opts.lifecycle !== 'function') throw new TypeError('createApp: opts.lifecycle is required');
   const log = opts.log ?? (() => {});
   const now = opts.now ?? Date.now;
   const startedMs = now();
@@ -194,9 +261,13 @@ export async function createApp(config, opts = {}) {
   const limiter = new RateLimiter({ now });
   const registry = new RunRegistry({ now, ...opts.runs });
   const hubs = new SseHubs(opts.sse);
-  const lifecycle = opts.lifecycle ?? createStubLifecycle(opts.stub);
+  const lifecycle = opts.lifecycle;
+  const storage = opts.storage ?? null;
+  const health = { ...UNCHECKED, ...opts.health };
+  const staticHandler = opts.staticHandler ?? null;
   const counters = { runs_total: 0, runs_failed: 0, rate_limited: 0, queue_rejections: 0 };
   let accepting = true;
+  let acceptingReason = null; // why accepting is false (self-test failure, shutdown)
 
   const reportUrl = (id) => (config.publicUrl ? `${config.publicUrl}/r/${id}` : `/r/${id}`);
 
@@ -322,12 +393,19 @@ export async function createApp(config, opts = {}) {
 
   const notFound = () => new HttpError(404, 'not_found', 'Not found.');
 
+  /** Disk guard (10.4): below 2 GB free under the runs dir, new runs are refused. */
+  async function diskLow() {
+    const freeMb = await health.diskFreeMb();
+    return freeMb !== null && freeMb * 1024 * 1024 < LIMITS.disk.minFreeBytes;
+  }
+
   // POST /api/runs ------------------------------------------------------------------------------
   async function postRun(ctx) {
     const { ip } = ctx;
     const killed = await killSwitchOn();
+    const low = await diskLow();
     // No await below this line: the checks and the enqueue happen atomically.
-    if (killed || !accepting) {
+    if (killed || !accepting || low) {
       throw new HttpError(503, 'runs_disabled', 'New runs are disabled right now; try again later.', {
         retryAfterS: LIMITS.retryAfterS.runsDisabled,
       });
@@ -377,18 +455,34 @@ export async function createApp(config, opts = {}) {
   }
 
   // GET /api/runs/:id ---------------------------------------------------------------------------
-  function getRun(ctx) {
+  const IMMUTABLE = { 'Cache-Control': 'public, max-age=86400, immutable' };
+
+  async function getRun(ctx) {
     limit('getRun', ctx.ip);
     const run = registry.get(ctx.params.id);
-    if (!run) throw notFound();
+    if (!run) {
+      // Not in memory any more (or never ran here): cache -> spool -> Object Storage (10.4).
+      if (!storage) throw notFound();
+      let report;
+      try {
+        report = await storage.getReport(ctx.params.id);
+      } catch (err) {
+        log({ level: 'warn', msg: 'storage.get_failed', run_id: ctx.params.id, err: err?.message ?? String(err) });
+        throw new HttpError(503, 'storage_unavailable', 'The report store is unavailable; try again shortly.', {
+          retryAfterS: LIMITS.retryAfterS.storageUnavailable,
+        });
+      }
+      if (!report) throw notFound();
+      ctx.json(200, { status: 'done', run_id: ctx.params.id, created_at: report.created_at ?? null, report }, IMMUTABLE);
+      return;
+    }
     const body = { status: run.status, run_id: run.run_id, created_at: run.created_at };
     if (run.status === 'queued') body.position = queue.position(run.run_id);
     if (run.status === 'running') body.phase = run.phase;
     body.last_n = run.last_n;
     if (run.status === 'done') body.report = run.report;
     if (run.status === 'error') body.error = run.error;
-    const cache = run.status === 'done' ? { 'Cache-Control': 'public, max-age=86400, immutable' } : {};
-    ctx.json(200, body, cache);
+    ctx.json(200, body, run.status === 'done' ? IMMUTABLE : {});
   }
 
   // GET /api/runs/:id/events --------------------------------------------------------------------
@@ -428,27 +522,48 @@ export async function createApp(config, opts = {}) {
     ctx.json(200, { samples: sampleList }, { 'Cache-Control': 'public, max-age=300' });
   }
 
+  /** 503 when docker, the sidecar, or the startup self-test failed (fail closed, section 11). */
   async function healthz(ctx) {
     limit('getOther', ctx.ip);
-    const killed = await killSwitchOn();
-    ctx.json(200, {
-      ok: true,
+    const [killed, dockerStatus, sidecar, storageStatus, diskFreeMb] = await Promise.all([
+      killSwitchOn(),
+      health.docker(),
+      health.sidecar(),
+      health.storage(),
+      health.diskFreeMb(),
+    ]);
+    const selftest = health.selftest();
+    const broken = (v) => !['ok', 'unchecked', 'local', 'pending'].includes(v);
+    const ok = !broken(dockerStatus) && !broken(sidecar) && !broken(selftest);
+    const low = diskFreeMb !== null && diskFreeMb * 1024 * 1024 < LIMITS.disk.minFreeBytes;
+    const body = {
+      ok,
       version: VERSION,
       uptime_s: Math.floor((now() - startedMs) / 1000),
-      accepting_runs: accepting && !killed,
+      accepting_runs: ok && accepting && !killed && !low && selftest !== 'pending',
       active_runs: queue.active,
       queued: queue.waiting,
-      // TODO(day 2+): real checks (docker version cached 30 s, sidecar socket + heartbeat,
-      // sinkhole self-test at start, HeadBucket cached 5 min, statfs on /srv); 503 when one fails.
       checks: {
-        docker: 'unchecked',
-        sidecar: 'unchecked',
-        sinkhole_selftest: 'unchecked',
-        storage: 'unchecked',
-        disk_free_mb: null,
+        docker: dockerStatus,
+        sidecar,
+        sinkhole_selftest: selftest,
+        storage: low ? 'degraded' : storageStatus,
+        disk_free_mb: diskFreeMb,
       },
       counters: { ...counters },
-    });
+    };
+    if (acceptingReason) body.reason = acceptingReason;
+    ctx.json(ok ? 200 : 503, body);
+  }
+
+  // GET /r/:id and static files ----------------------------------------------------------------
+  function serveReportShell(req, res, id) {
+    res.setHeader('X-Robots-Tag', 'noindex');
+    if (staticHandler && staticHandler(req, res, `/r/${id}`)) return;
+    // Placeholder until web/report.html exists: the API link still works.
+    const html = `<!doctype html><meta charset="utf-8"><title>FirstRun report</title><p>Report <code>${id}</code>: <a href="/api/runs/${id}">/api/runs/${id}</a></p>`;
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' });
+    res.end(html);
   }
 
   const router = createRouter({ log });
@@ -459,9 +574,36 @@ export async function createApp(config, opts = {}) {
   router.route('GET', '/api/samples', getSamples);
   router.route('GET', '/healthz', healthz);
 
+  /** Static files and /r/:id go first (GET/HEAD, outside /api); everything else is the router. */
+  function handle(req, res) {
+    const url = req.url ?? '/';
+    const q = url.indexOf('?');
+    const pathname = q === -1 ? url : url.slice(0, q);
+    if ((req.method === 'GET' || req.method === 'HEAD') && !pathname.startsWith('/api/') && pathname !== '/healthz') {
+      const m = REPORT_PATH_RE.exec(pathname);
+      if (m) {
+        if (!RUN_ID_RE.test(m[1])) {
+          sendJson(res, 404, { error: 'not_found', message: 'Not found.' });
+          return;
+        }
+        serveReportShell(req, res, m[1]);
+        return;
+      }
+      if (staticHandler && staticHandler(req, res, pathname)) return;
+    }
+    return router.handle(req, res);
+  }
+
+  /** Startup self-test outcome (main.mjs): a failure keeps accepting_runs false, fail closed. */
+  function setAccepting(value, reason = null) {
+    accepting = Boolean(value);
+    acceptingReason = accepting ? null : reason;
+  }
+
   /** Stop accepting runs, fail the waiting ones, give active ones graceMs, then end all streams. */
   async function shutdown({ graceMs = LIMITS.shutdownGraceMs } = {}) {
     accepting = false;
+    acceptingReason = 'shutting down';
     for (const run of queue.close()) {
       failRun(run, new RunError('internal', 'The server is restarting; please retry.', { stage: 'queue', retryable: true }));
     }
@@ -474,8 +616,9 @@ export async function createApp(config, opts = {}) {
   }
 
   return {
-    handle: router.handle,
+    handle,
     shutdown,
+    setAccepting,
     queue,
     registry,
     hubs,
@@ -483,6 +626,11 @@ export async function createApp(config, opts = {}) {
     samples,
     counters,
     freeformEnabled,
+    /** For the janitor: a run that is queued or running must not be swept. */
+    isActive: (runId) => {
+      const run = registry.get(runId);
+      return Boolean(run && run.ended_ms === null);
+    },
     get accepting() {
       return accepting;
     },

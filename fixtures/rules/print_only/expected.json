@@ -1,0 +1,13 @@
+{
+  "level": "CLEAN",
+  "rule_ids": [],
+  "severity_counts": {
+    "info": 1
+  },
+  "rules_present": [
+    "run.no_activity"
+  ],
+  "notes_include": [
+    "The command only printed text; no file, network or program activity was observed."
+  ]
+}

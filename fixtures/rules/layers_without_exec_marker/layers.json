@@ -1,0 +1,18 @@
+[
+  {
+    "index": 1,
+    "parent": 0,
+    "method": "base64",
+    "bytes_len": 20,
+    "text": "hello world",
+    "truncated": false,
+    "markers": {
+      "exec": [],
+      "remote": [],
+      "decode": [],
+      "opaque": 0
+    },
+    "llm_assisted": false,
+    "status": "ok"
+  }
+]

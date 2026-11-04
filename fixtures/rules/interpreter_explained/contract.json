@@ -1,0 +1,13 @@
+{
+  "summary": "runs a node script that decodes a file",
+  "expected_hosts": [],
+  "expected_write_paths": [],
+  "expected_processes": [
+    "node",
+    "python3",
+    "gunzip",
+    "socat"
+  ],
+  "allowed_decoy_categories": [],
+  "notes": ""
+}

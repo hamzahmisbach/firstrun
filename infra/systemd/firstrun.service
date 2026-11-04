@@ -6,6 +6,7 @@ After=network-online.target docker.service firstrun-sink.service
 [Service]
 User=firstrun
 Group=firstrun
+# Only this unit may reach /var/run/docker.sock; the user itself is not in the docker group.
 SupplementaryGroups=docker
 EnvironmentFile=/etc/firstrun/firstrun.env
 Environment=NODE_ENV=production
@@ -17,6 +18,8 @@ RestartSec=2
 KillSignal=SIGTERM
 TimeoutStopSec=20
 NoNewPrivileges=yes
+# full, not strict: /srv (run dirs, trace, spool) and /run/docker.sock stay writable without a
+# ReadWritePaths list. PrivateTmp means bind mounts must never come from /tmp (scripts/selfcheck.sh).
 ProtectSystem=full
 ProtectHome=yes
 PrivateTmp=yes

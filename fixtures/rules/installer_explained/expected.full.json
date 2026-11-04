@@ -1,0 +1,23 @@
+{
+  "verdict": {
+    "level": "CLEAN",
+    "rule_ids": [],
+    "coverage_notes": [
+      "CLEAN means nothing suspicious was observed in this run (Linux sandbox, 60 s, no internet), not proof that the command is safe.",
+      "The internet in this sandbox is fake: every site it tried to reach was answered by FirstRun's own server with an empty reply, and nothing was forwarded.",
+      "Because the internet here is fake, anything this command would have downloaded and run was not observed."
+    ]
+  },
+  "findings": [
+    {
+      "id": "fs.shell_startup_write:11",
+      "rule_id": "fs.shell_startup_write",
+      "severity": "low",
+      "classification": "explained",
+      "title": "Wrote to shell startup file ~/.bashrc",
+      "event_seqs": [
+        11
+      ]
+    }
+  ]
+}

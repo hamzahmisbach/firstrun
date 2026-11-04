@@ -1,0 +1,10 @@
+{
+  "summary": "copies files with scp",
+  "expected_hosts": [],
+  "expected_write_paths": [],
+  "expected_processes": [
+    "scp"
+  ],
+  "allowed_decoy_categories": [],
+  "notes": ""
+}

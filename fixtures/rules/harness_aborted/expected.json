@@ -1,0 +1,8 @@
+{
+  "level": "CLEAN",
+  "rule_ids": [],
+  "severity_counts": {},
+  "notes_include": [
+    "Inner layers of the command could not be fully decoded; the verdict rests on runtime evidence only."
+  ]
+}

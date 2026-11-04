@@ -1,0 +1,12 @@
+{
+  "summary": "lists S3 buckets",
+  "expected_hosts": [],
+  "expected_write_paths": [],
+  "expected_processes": [
+    "aws"
+  ],
+  "allowed_decoy_categories": [
+    "cloud_credentials"
+  ],
+  "notes": ""
+}

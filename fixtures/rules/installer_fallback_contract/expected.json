@@ -1,0 +1,15 @@
+{
+  "level": "SUSPICIOUS",
+  "rule_ids": [
+    "fs.shell_startup_write",
+    "net.unexpected_host"
+  ],
+  "severity_counts": {
+    "high": 1,
+    "medium": 2,
+    "low": 1
+  },
+  "notes_include": [
+    "The claim could not be turned into a contract; every host and path is treated as unexplained."
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "level": "SUSPICIOUS",
+  "rule_ids": [
+    "decoy.credential_read",
+    "exfil.canary_stdout"
+  ],
+  "severity_counts": {
+    "high": 1,
+    "medium": 1
+  }
+}

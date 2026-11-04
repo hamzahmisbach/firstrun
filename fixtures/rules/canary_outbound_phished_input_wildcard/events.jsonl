@@ -1,0 +1,4 @@
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":1,"ts_ms":1762250000100,"t_rel_ms":100,"source":"sinkhole","kind":"tls.clienthello","sni":"api.example.test","port":443,"alpn":["h2","http/1.1"]}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":2,"ts_ms":1762250000200,"t_rel_ms":200,"source":"sinkhole","kind":"http.request","method":"GET","host":"api.example.test","port":443,"path":"/?t=FRPWFIXTURETOKEN23456ABC","body_len":0,"scheme":"https","status":200,"canned":false}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":3,"ts_ms":1762250000300,"t_rel_ms":300,"source":"orchestrator","kind":"canary.hit","decoy_id":"pw","category":"phished_input","form":"raw","where":"url","event_seq":2}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":4,"ts_ms":1762250000400,"t_rel_ms":400,"source":"orchestrator","kind":"exec.finished","exit_code":0,"timed_out":false}

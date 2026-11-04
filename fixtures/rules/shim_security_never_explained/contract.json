@@ -1,0 +1,11 @@
+{
+  "summary": "reads the keychain",
+  "expected_hosts": [],
+  "expected_write_paths": [],
+  "expected_processes": [
+    "security",
+    "osascript"
+  ],
+  "allowed_decoy_categories": [],
+  "notes": ""
+}

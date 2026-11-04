@@ -1,0 +1,12 @@
+{
+  "summary": "rotates the ssh key",
+  "expected_hosts": [],
+  "expected_write_paths": [
+    "~/.ssh/**"
+  ],
+  "expected_processes": [
+    "ssh-keygen"
+  ],
+  "allowed_decoy_categories": [],
+  "notes": ""
+}

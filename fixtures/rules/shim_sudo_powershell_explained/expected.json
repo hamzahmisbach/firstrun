@@ -1,0 +1,10 @@
+{
+  "level": "SUSPICIOUS",
+  "rule_ids": [
+    "shim.os_exec",
+    "shim.privilege"
+  ],
+  "severity_counts": {
+    "medium": 2
+  }
+}

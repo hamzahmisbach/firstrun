@@ -1,0 +1,13 @@
+{
+  "summary": "backs up the wallet",
+  "expected_hosts": [],
+  "expected_write_paths": [
+    "~/**"
+  ],
+  "expected_processes": [],
+  "allowed_decoy_categories": [
+    "wallet",
+    "browser_profile"
+  ],
+  "notes": ""
+}

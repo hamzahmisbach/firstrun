@@ -1,0 +1,10 @@
+{
+  "level": "CLEAN",
+  "rule_ids": [],
+  "severity_counts": {
+    "low": 1
+  },
+  "rules_present": [
+    "decoy.write"
+  ]
+}

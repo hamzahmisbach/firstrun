@@ -9,6 +9,51 @@ import { createApp } from '../http/routes.mjs';
 
 export const ACCESS_CODE = 'test-access-code-0123456789abcdef';
 
+export const STUB_NOTE = 'STUB: this test lifecycle did not execute the command.';
+
+/**
+ * Fake lifecycle for HTTP tests: walks the phases with short sleeps, emits the SSE events the UI
+ * expects (run.started, exec.started, exec.finished, verdict, run.done) and hands back a report in
+ * the 10.3 shape marked `stub: true`. Nothing is executed.
+ */
+export function createStubLifecycle({ stepMs = 5 } = {}) {
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  return async function stubLifecycle(run, ctx) {
+    ctx.emit('run.started', { sample_id: run.sample_id, command_sha256: run.command_sha256, claim: run.input.claim });
+    ctx.phase('setup');
+    await sleep(stepMs);
+    ctx.phase('exec');
+    ctx.emit('exec.started', { container_id: null, timeout_s: 60 });
+    await sleep(stepMs);
+    ctx.emit('exec.finished', { exit_code: 0, timed_out: false, killed_by: null, duration_ms: stepMs, stdout_bytes: 0, stderr_bytes: 0 });
+    ctx.phase('rules');
+    const verdict = { level: 'CLEAN', rule_ids: [], coverage_notes: [STUB_NOTE] };
+    ctx.emit('verdict', { verdict, findings: [] });
+    ctx.phase('upload');
+    await sleep(stepMs);
+    ctx.done({
+      schema_version: 1,
+      stub: true,
+      run_id: run.run_id,
+      created_at: run.created_at,
+      input: run.input,
+      layers: [],
+      contract: { summary: '', expected_hosts: [], expected_write_paths: [], expected_processes: [], allowed_decoy_categories: [], notes: '' },
+      contract_meta: { source: 'fallback', prompt_version: 'stub' },
+      events: [],
+      findings: [],
+      verdict,
+      explanation: { verdict_echo: 'CLEAN', headline: 'Stub run', paragraphs: [STUB_NOTE], finding_notes: [], next_step: '' },
+      explanation_meta: { source: 'template' },
+      decoys: [],
+      coverage: { timed_out: false, tls_unreadable: [], notes: [STUB_NOTE], mode: 'stub', gvisor_dropped: 0, decode_errors: 0, pre_t0: 0, dedup: 0, capped: {}, scan_truncated: false, oom_killed: false },
+      output: { stdout_preview: '', stderr_preview: '', stdout_bytes: 0, stderr_bytes: 0, truncated: false },
+      timing: { queued_ms: 0, setup_ms: 0, unwrap_ms: 0, exec_ms: 0, rules_ms: 0, explain_ms: 0, upload_ms: 0, total_ms: 0 },
+      models_used: [],
+    });
+  };
+}
+
 export const DEFAULT_SAMPLES = {
   hello: {
     'command.txt': 'echo hello\r\n',
@@ -43,7 +88,7 @@ export async function startApp({ env = {}, samples = DEFAULT_SAMPLES, app: appOp
     ...env,
   });
   const logs = [];
-  const app = await createApp(config, { log: (record) => logs.push(record), stub: { stepMs: 5 }, ...appOpts });
+  const app = await createApp(config, { log: (record) => logs.push(record), lifecycle: createStubLifecycle(), ...appOpts });
   const server = http.createServer(app.handle);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;

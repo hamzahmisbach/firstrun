@@ -1,0 +1,26 @@
+{
+  "verdict": "SUSPICIOUS",
+  "rule_ids": {
+    "require": ["fs.shell_startup_write", "shim.persistence"],
+    "forbid": ["exfil.canary_outbound", "exfil.read_then_send", "shim.credential_prompt", "shim.privilege", "shim.os_exec", "net.unexpected_upload", "net.unexpected_host", "run.timeout", "run.no_activity"]
+  },
+  "events": {
+    "require": [
+      { "kind": "shim.call", "tool": "launchctl" },
+      { "kind": "shim.call", "tool": "crontab" },
+      { "kind": "shim.call", "tool": "systemctl" },
+      { "kind": "file.open", "path": "/home/dev/.bashrc", "access": "re:^(write|create)$" }
+    ],
+    "forbid": [
+      { "kind": "http.request" },
+      { "kind": "dns.query" },
+      { "kind": "tls.clienthello" },
+      { "kind": "canary.hit" },
+      { "kind": "file.open", "decoy_id": "re:." }
+    ]
+  },
+  "alerts_min": 0,
+  "layers_min": 0,
+  "exit_code": 0,
+  "notes": "Verified in a throwaway sandbox on 2026-11-04: three execve records with binary_path /opt/firstrun/shims/_shim (launchctl, crontab, systemctl), one open of /home/dev/.bashrc with O_WRONLY|O_CREAT|O_APPEND (so access may be reported as create), no connect, no sinkhole records. Shim output is redirected to /dev/null so the pw canary never reaches stdout."
+}

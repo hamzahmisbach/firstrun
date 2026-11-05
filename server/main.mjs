@@ -1,5 +1,5 @@
 // Bootstrap: validate env, load peer modules, build storage, LLM client, lifecycle and janitor,
-// listen on FIRSTRUN_LISTEN (127.0.0.1:3000; Caddy is the only public entry), then run the startup
+// listen on FIRSTRUN_LISTEN (127.0.0.1:3000; nginx is the only public entry), then run the startup
 // self-tests (sidecar socket, docker, scripts/selfcheck.sh). Until they pass accepting_runs stays
 // false and /healthz answers 503: fail closed (section 11), but observable.
 // Logs are one JSON object per line on stdout (journald). Never log command text, claims or codes.

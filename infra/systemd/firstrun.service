@@ -1,6 +1,6 @@
 [Unit]
 Description=FirstRun orchestrator
-Wants=firstrun-sink.service docker.service caddy.service
+Wants=firstrun-sink.service docker.service nginx.service
 After=network-online.target docker.service firstrun-sink.service
 
 [Service]

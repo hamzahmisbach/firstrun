@@ -4,7 +4,7 @@ Paste a command that a website, video or chat told you to run, plus one line on 
 
 Built for the Vultr "Agent Rush" hackathon on lablab.ai, Challenge 1 "Blast Radius Zero".
 
-> Status (2026-11-05): the full flow runs on a private Vultr VM: sandbox, fake internet, rules, AI review, second run, report and web UI. No public URL yet.
+> Status (2026-11-05): live at https://firstrun.makmurlab.com. The full flow runs on one Vultr VM: sandbox, fake internet, rules, AI review, second run, report and web UI.
 
 ## 1. What FirstRun does
 
@@ -16,7 +16,7 @@ Copy-paste attacks such as ClickFix and fake install pages ask people to paste a
 
 | Service | Role |
 |---|---|
-| **Cloud Compute** (one VM, 2 vCPU, Ubuntu 26.10 as installed; the plan targeted 24.04 and `infra/setup-vm.sh` only warns) | Runs everything: the Node.js orchestrator, Docker with the gVisor `runsc` runtime, the per-run sandbox and sinkhole containers, the trace sidecar, and Caddy for HTTPS. There are no other third-party services. |
+| **Cloud Compute** (one VM, 2 vCPU, Ubuntu 26.10 as installed; the plan targeted 24.04 and `infra/setup-vm.sh` only warns) | Runs everything: the Node.js orchestrator, Docker with the gVisor `runsc` runtime, the per-run sandbox and sinkhole containers, the trace sidecar, and nginx with a Let's Encrypt certificate from certbot for HTTPS. There are no other third-party services. |
 | **Serverless Inference** (`api.vultrinference.com/v1`, OpenAI-compatible chat completions) | All LLM calls of the agent: the harness writer that unwraps encoded layers, the claim-to-contract translation, the AI reviewer that reads the code, and the explanation writer. Every call is JSON-only and validated with zod; the model per role is set in `server/llm/config.json` from the probe in `scripts/probe-vultr-inference.mjs`, and each report lists them under `models_used`, which is the evidence for Challenge 1's requirement that the agent's LLM calls go through Serverless Inference. JSON-only because the LLM never decides the verdict; it only produces structured inputs for deterministic code. |
 | **Object Storage** (S3-compatible, private bucket) | One JSON report per run under `reports/<run_id>.json`. The bucket is never public: the share link `/r/<id>` is served by the orchestrator, which reads the object with its own key. (Credentials not yet provisioned on the instance; until then reports live in the orchestrator's memory cache and local spool.) |
 | **Vultr Firewall** | Firewall group on the instance: inbound TCP 22, 80, 443 only, plus `ufw` on the host as a second layer. The sandbox network has no route to the host or the internet at all. |
@@ -27,7 +27,7 @@ Copy-paste attacks such as ClickFix and fake install pages ask people to paste a
 flowchart LR
   U["Browser: command + claim,<br/>live timeline, report /r/ID"]
   subgraph VM["Vultr Cloud Compute VM"]
-    C["Caddy :443"]
+    C["nginx :443"]
     O["Orchestrator (Node.js 24)<br/>API, SSE, queue, decoder,<br/>canary matcher, rules, report"]
     G["Trace sidecar (Python)<br/>gVisor remote sink -> JSONL"]
     D["dockerd + runsc (gVisor)"]
@@ -49,7 +49,7 @@ flowchart LR
   O -->|"PUT reports/ID.json"| OS
 ```
 
-Trust boundary: everything inside the sandbox container is untrusted. The sinkhole is our code but processes untrusted bytes, so it runs with minimal capabilities, a read-only root filesystem and no route out. The orchestrator, the sidecar, Caddy and the keys (Inference, Object Storage) exist only on the host and never enter a container. Behaviour evidence (processes executed, files opened, connections attempted) comes from gVisor trace points streamed from *outside* the sandbox, and file deletions, renames, permission changes and links from runsc's own strace log of those syscalls (`/var/log/firstrun/runsc/<cid>.boot.log`, read and deleted by the orchestrator); the network side comes from the sinkhole's records; the two are matched against the per-run canary manifest on the host.
+Trust boundary: everything inside the sandbox container is untrusted. The sinkhole is our code but processes untrusted bytes, so it runs with minimal capabilities, a read-only root filesystem and no route out. The orchestrator, the sidecar, nginx and the keys (Inference, Object Storage) exist only on the host and never enter a container. Behaviour evidence (processes executed, files opened, connections attempted) comes from gVisor trace points streamed from *outside* the sandbox, and file deletions, renames, permission changes and links from runsc's own strace log of those syscalls (`/var/log/firstrun/runsc/<cid>.boot.log`, read and deleted by the orchestrator); the network side comes from the sinkhole's records; the two are matched against the per-run canary manifest on the host.
 
 Per run: a Docker `--internal` network with `gateway_mode_ipv4=isolated` (no address on the host), one sinkhole container (`runc`), one sandbox container (`runsc`, systrap platform, no KVM needed) with `--read-only`, tmpfs HOME seeded from decoy files, `--cap-drop ALL`, 512 MB, 1 CPU, 128 pids, a 60 s `timeout -s KILL` inside and a 75 s watchdog outside. Teardown runs in a `finally` block and a janitor sweeps anything labelled `firstrun.run` older than 10 minutes. The full design, every flag and its source, is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (Indonesian).
 
@@ -94,13 +94,13 @@ sudo bash scripts/smoke.sh                    # docs/ARCHITECTURE.md 12 step 19,
 node scripts/fixture-check.mjs                # the three demo samples against the local API
 ```
 
-Step 6 of the manual checklist (deploy user, SSH hardening, `ufw`) and the hostname/Caddy setup (`FIRSTRUN_HOSTNAME=<host> sudo bash infra/setup-vm.sh`) are described in `docs/ARCHITECTURE.md` section 12. `.env.example` lists every variable; the important ones are `VULTR_INFERENCE_API_KEY`, `FIRSTRUN_S3_*`, `FIRSTRUN_ACCESS_CODE` (at least 24 characters) and `FIRSTRUN_PUBLIC_URL`. Day-to-day operations (restart, rotate the access code, curated-only mode, restore) are in [docs/RUNBOOK.md](docs/RUNBOOK.md).
+Step 6 of the manual checklist (deploy user, SSH hardening, `ufw`) and public HTTPS (`sudo bash infra/setup-https.sh <host>`, nginx and certbot) are described in `docs/ARCHITECTURE.md` section 12. `.env.example` lists every variable; the important ones are `VULTR_INFERENCE_API_KEY`, `FIRSTRUN_S3_*`, `FIRSTRUN_ACCESS_CODE` (at least 24 characters) and `FIRSTRUN_PUBLIC_URL`. Day-to-day operations (restart, rotate the access code, curated-only mode, restore) are in [docs/RUNBOOK.md](docs/RUNBOOK.md).
 
 ## 6. Demo
 
-- **Public demo URL:** `<PUBLIC_URL>` <!-- TODO: fill in once the hostname and certificate are live -->
+- **Public demo URL:** https://firstrun.makmurlab.com
 - **Video (3 min):** `<VIDEO_URL>` <!-- TODO: link with a timestamp for the containment moment -->
-- **Cached report links:** see [docs/DEMO.md](docs/DEMO.md) (placeholders until day 5).
+- **Cached report links:** see [docs/DEMO.md](docs/DEMO.md).
 
 Three curated samples that anyone can run without a code (`fixtures/samples/`):
 
@@ -116,6 +116,7 @@ Free-form input (your own command) needs the `x-firstrun-access-code` header, wh
 
 - **Sandbox**: gVisor (`runsc`) with a read-only root filesystem, tmpfs HOME, uid 1000, no capabilities, `no-new-privileges`, 512 MB, 1 CPU, 128 pids (measured: about 42 concurrent processes, because sentry threads count too), 60 s wall clock. The environment holds no secrets; every credential in HOME is a per-run canary.
 - **Network**: `--internal` network with an isolated gateway; the only neighbour is the sinkhole, which answers every DNS name with its own address, terminates TLS with a throwaway test CA, records every request and raw TCP/UDP connection, and never forwards anything. Literal IPs fail immediately. `scripts/netcheck.sh` proves this at every orchestrator start.
+- **Public entry**: nginx on ports 80 and 443 is the only way in; the orchestrator listens on `127.0.0.1:3000`. Requests that do not name the hostname are dropped, HTTP redirects to HTTPS, and `X-Forwarded-For` is overwritten so a client cannot pick its own rate-limit bucket. nginx keeps no access log; the orchestrator's log in journald, kept 7 days, is the only record of requests.
 - **Evidence from outside**: gVisor trace points (`container/start`, `sentry/execve`, `syscall/openat`, `syscall/connect`) are delivered over a Unix socket to a sidecar on the host; a sandboxed process cannot suppress them. If the sidecar is down, no sandbox starts (fail closed).
 - **Host**: Docker is only ever invoked with `execFile` and no shell; the only request value that reaches a Docker argument or a host path is the 26-character run id; secrets are never inherited by child processes; nothing is logged except sizes and hashes.
 - **Abuse controls**: access code for free-form input, rate limits per IP and global, kill switch file, disk guard, janitor.

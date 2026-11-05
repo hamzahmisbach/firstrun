@@ -27,9 +27,9 @@ function deepFreeze(obj) {
 
 export const LIMITS = deepFreeze({
   http: {
-    bodyMaxBytes: 64 * KiB, // 413 above this (Caddy enforces the same limit in front)
+    bodyMaxBytes: 64 * KiB, // 413 above this (nginx stops anything over 128 KiB in front)
     bodyDrainMaxBytes: 1 * MiB, // oversized bodies up to this are read and dropped before the 413
-    keepAliveTimeoutMs: 125 * SECOND, // above Caddy's 2 min upstream keepalive, so Caddy closes idle sockets first
+    keepAliveTimeoutMs: 125 * SECOND, // above nginx's 60 s upstream keepalive, so nginx closes idle sockets first
   },
   input: {
     commandMaxBytes: 16 * KiB, // 16384 bytes of UTF-8 after normalization

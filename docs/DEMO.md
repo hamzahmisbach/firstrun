@@ -75,9 +75,8 @@ patch rules on demo day: fall back to the cached report links (below) and the vi
 
 ## Cached report links
 
-<!-- TODO (day 5): generate one run per sample on the public instance and paste the /r/<id> links
-here and in fixtures/samples/*/report-url.txt. -->
+One run per sample on the public instance, made on 2026-11-05. They rest on the VM's local storage until Object Storage is set up.
 
-- nvm: `https://<PUBLIC_URL>/r/<RUN_ID>` (placeholder)
-- canary: `https://<PUBLIC_URL>/r/<RUN_ID>` (placeholder)
-- shim: `https://<PUBLIC_URL>/r/<RUN_ID>` (placeholder)
+- nvm: https://firstrun.makmurlab.com/r/ASNZ6EACMW4VH33TRTTQW4V3YR
+- canary: https://firstrun.makmurlab.com/r/2EQ1CFJD9ZP19F2S8T47FM2SXR
+- shim: https://firstrun.makmurlab.com/r/GESYTYEKXVFAT09CEXRMAW80T8

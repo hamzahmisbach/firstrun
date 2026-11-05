@@ -2,7 +2,7 @@
 # Idempotent VM setup for FirstRun on Ubuntu 24.04 (docs/ARCHITECTURE.md section 12, steps 7-13 and 17-18).
 # Run from the repo checkout (normally /opt/firstrun):  sudo bash infra/setup-vm.sh
 # Step 6 (deploy user, SSH hardening, ufw) stays manual. Optional env:
-#   FIRSTRUN_HOSTNAME=firstrun.duckdns.org   also installs Caddy and renders infra/caddy/Caddyfile
+#   FIRSTRUN_HOSTNAME=firstrun.example.org   also runs infra/setup-https.sh (nginx and certbot)
 #   INSTALL_PWSH=1                           builds the sandbox image with PowerShell (slower)
 set -euo pipefail
 
@@ -120,19 +120,7 @@ if [[ -f "$REPO_DIR/server/main.mjs" ]]; then
 fi
 
 if [[ -n "${FIRSTRUN_HOSTNAME:-}" ]]; then
-  [[ "$FIRSTRUN_HOSTNAME" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] || die "FIRSTRUN_HOSTNAME is not a valid hostname"
-  log "Caddy for $FIRSTRUN_HOSTNAME"
-  if ! command -v caddy >/dev/null 2>&1; then
-    apt-get install -y debian-keyring debian-archive-keyring apt-transport-https
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
-    chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg /etc/apt/sources.list.d/caddy-stable.list
-    apt-get update -y
-    apt-get install -y caddy
-  fi
-  sed "s#__FIRSTRUN_HOSTNAME__#${FIRSTRUN_HOSTNAME}#g" "$REPO_DIR/infra/caddy/Caddyfile" > /etc/caddy/Caddyfile
-  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-  systemctl reload caddy || systemctl restart caddy
+  bash "$REPO_DIR/infra/setup-https.sh" "$FIRSTRUN_HOSTNAME"
 fi
 
 log "done"

@@ -82,6 +82,27 @@ cd /opt/firstrun && sudo bash scripts/build-images.sh
 No service restart is needed: every run starts fresh containers from `firstrun/sandbox:latest` and
 `firstrun/sinkhole:latest`.
 
+## Public HTTPS
+
+nginx is the only public entry (ports 80 and 443); the orchestrator stays on `127.0.0.1:3000`. To set
+it up or repair it, run this; it is safe to run again and restarts the orchestrator:
+
+```bash
+sudo bash infra/setup-https.sh firstrun.makmurlab.com
+```
+
+To check it:
+
+```bash
+sudo certbot certificates                                  # expiry date
+systemctl list-timers certbot.timer                        # next renewal check
+sudo certbot renew --dry-run --no-random-sleep-on-renew    # try a renewal, changes nothing
+sudo nginx -t && sudo systemctl reload nginx               # after editing /etc/nginx/sites-available/firstrun-*
+```
+
+The certificate was requested without an email address, so Let's Encrypt sends no expiry warnings.
+`certbot.timer` renews it on its own. To add an address: `sudo certbot update_account --email <address>`.
+
 ## Logs
 
 ```bash
@@ -108,11 +129,11 @@ cd /opt/firstrun && sudo bash infra/setup-vm.sh && sudo bash scripts/smoke.sh
 
 `setup-vm.sh` is idempotent (packages, Docker runtimes, images, systemd units); `smoke.sh` proves
 containment and trace capture before the site is announced healthy again. If the public IP changed,
-update the DNS record and let Caddy renew the certificate.
+update the DNS record; the certificate keeps working because it belongs to the hostname.
 
 ## If the VM looks compromised
 
-Do not repair in place. In order: kill switch and `sudo systemctl stop firstrun firstrun-sink caddy`;
+Do not repair in place. In order: kill switch and `sudo systemctl stop firstrun firstrun-sink nginx`;
 restrict the Vultr firewall group to SSH from the team IP; rotate every credential from the console
 (Serverless Inference key, Object Storage keys, access code, DNS token); copy `journalctl -o export`
 and `docker ps -a` to a laptop; destroy the instance; deploy a fresh one with `infra/setup-vm.sh` and

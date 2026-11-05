@@ -17,7 +17,7 @@ flowchart LR
   U["Browser<br/>1 halaman: input command + claim,<br/>timeline SSE, report /r/ID"]
 
   subgraph VM["Vultr Cloud Compute VM, Ubuntu 26.10"]
-    C["Caddy :80/:443<br/>auto TLS (Let's Encrypt / ZeroSSL)"]
+    C["nginx :80/:443<br/>sertifikat Let's Encrypt lewat certbot"]
     O["Orchestrator (Node.js 24 LTS)<br/>API + SSE + queue + decoder + rules + report"]
     G["gvisor-sink.py sidecar<br/>UDS SOCK_SEQPACKET, protobuf -> JSONL"]
     D["dockerd + runsc (gVisor, systrap)"]
@@ -42,7 +42,7 @@ flowchart LR
   O -.->|"GET report saat /r/ID dibuka"| OS
 ```
 
-Batas kepercayaan: segala sesuatu di dalam `fr-ID-sb` adalah untrusted. Sinkhole adalah kode kita tapi memproses byte untrusted, jadi dibatasi caps dan tidak punya jalan keluar. Orchestrator, sidecar, Caddy, dan key (inference, S3) hanya ada di host dan tidak pernah masuk ke container mana pun.
+Batas kepercayaan: segala sesuatu di dalam `fr-ID-sb` adalah untrusted. Sinkhole adalah kode kita tapi memproses byte untrusted, jadi dibatasi caps dan tidak punya jalan keluar. Orchestrator, sidecar, nginx, dan key (inference, S3) hanya ada di host dan tidak pernah masuk ke container mana pun.
 
 ---
 
@@ -56,7 +56,7 @@ Batas kepercayaan: segala sesuatu di dalam `fr-ID-sb` adalah untrusted. Sinkhole
 | **Sandbox image** (`sandbox/`) | Image "workstation developer": bash/sh/zsh, curl, wget, python3, node, pwsh, git, tar/gzip/xz, jq, openssl; test CA terpasang; user `dev` uid 1000; shim di PATH; `entry.sh` yang seed HOME lalu jalankan command dengan `timeout` | `ubuntu:24.04`, dibuild di VM |
 | **Sinkhole image** (`sinkhole/`) | DNS wildcard, terminasi TLS untuk hostname apa pun, catat setiap request (URL, header, body) dan koneksi TCP ke port apa pun, jawab 200 kosong (atau fixture canned untuk curated sample), tidak pernah connect ke upstream | `mitmproxy/mitmproxy` official image + `dnsmasq` + `iptables`, addon Python 60-100 baris |
 | **Docker + runsc** | Isolasi proses (gVisor), cgroup limits, network namespace per run | Docker Engine dari repo Docker (butuh >= 28.0 untuk gateway mode `isolated`), runsc dari apt repo gvisor.dev |
-| **Caddy** | HTTPS publik, reverse proxy ke `127.0.0.1:3000`, SSE tanpa buffering | Paket apt `caddy` |
+| **nginx + certbot** | HTTPS publik, reverse proxy ke `127.0.0.1:3000`, SSE tanpa buffering | Paket apt `nginx` dan `certbot` |
 | **Vultr Serverless Inference** | Tiga (empat di stretch) panggilan LLM, semua output JSON tervalidasi | OpenAI-compatible `POST /v1/chat/completions` ([docs](https://docs.vultr.com/products/compute/serverless-inference/management/usage/chat)) |
 | **Vultr Object Storage** | Simpan report JSON per run, sumber kebenaran untuk link share | S3-compatible, endpoint `<region>.vultrobjects.com` ([docs s3cmd](https://docs.vultr.com/how-to-use-s3cmd-with-vultr-object-storage), [compat matrix](https://docs.vultr.com/products/storage/object-storage/s3-compatibility-matrix)) |
 | **Fixtures** (`fixtures/`) | Tiga input demo tulisan tim + canned response untuk sample nvm | Teks + JSON, tanpa payload pihak ketiga |
@@ -885,7 +885,7 @@ Decoder 8.2 diuji di file terpisah dengan input sintetis buatan tim (base64/hex/
 
 ## 10. API, SSE, dan storage
 
-Orchestrator hanya listen di `127.0.0.1:3000` (env `FIRSTRUN_LISTEN`); semua trafik publik lewat Caddy (bagian 12). Respons API selalu JSON `application/json; charset=utf-8`; error selalu `{"error":"<kode_snake_case>","message":"<teks pendek>","retry_after_s"?:n}`. Tidak ada cookie, session, atau header CORS: API hanya bisa dipanggil dari origin kita sendiri (header kustom `x-firstrun-access-code` memaksa preflight yang tidak pernah kita jawab), jadi tidak ada permukaan CSRF. Satu-satunya "auth" adalah access code untuk input bebas.
+Orchestrator hanya listen di `127.0.0.1:3000` (env `FIRSTRUN_LISTEN`); semua trafik publik lewat nginx (bagian 12). Respons API selalu JSON `application/json; charset=utf-8`; error selalu `{"error":"<kode_snake_case>","message":"<teks pendek>","retry_after_s"?:n}`. Tidak ada cookie, session, atau header CORS: API hanya bisa dipanggil dari origin kita sendiri (header kustom `x-firstrun-access-code` memaksa preflight yang tidak pernah kita jawab), jadi tidak ada permukaan CSRF. Satu-satunya "auth" adalah access code untuk input bebas.
 
 ### 10.1 HTTP endpoints
 
@@ -904,10 +904,10 @@ Catatan:
 - `run_id` adalah satu-satunya nilai dari request yang pernah masuk ke argumen `docker` atau path host (bagian 4). Regex dicek di router sebelum handler apa pun.
 - Validasi body pakai zod: `command` 1..16384 byte, UTF-8 valid (`new TextDecoder("utf-8",{fatal:true})`), NUL dibuang, CRLF dinormalisasi ke LF (kalau tidak, `\r` membuat bash gagal dan report jadi menyesatkan); `claim` 1..300 karakter; `sample_id` cocok `^[a-z0-9][a-z0-9-]{0,39}$` **dan** ada di `fixtures/samples/`. Untuk `sample_id`, command dan claim diambil dari fixture di server, bukan dari body, supaya jalur sample tidak bisa dipakai menyelundupkan input bebas.
 - Access code dibandingkan sebagai `sha256(header)` vs `sha256(FIRSTRUN_ACCESS_CODE)` lewat `crypto.timingSafeEqual`; nilainya tidak pernah di-log.
-- IP klien = nilai **terakhir** di `X-Forwarded-For`. Caddy mengabaikan nilai `X-Forwarded-For` dari klien yang bukan `trusted_proxies` "to prevent spoofing" dan mengisi IP peer yang ia lihat sendiri ([reverse_proxy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)); orchestrator hanya menerima koneksi dari 127.0.0.1, jadi nilai itu tepercaya.
+- IP klien = nilai **terakhir** di `X-Forwarded-For`. nginx menimpa header itu dengan alamat yang ia lihat sendiri (`proxy_set_header X-Forwarded-For $remote_addr`), dan orchestrator hanya menerima koneksi dari 127.0.0.1, jadi nilai itu tepercaya. Diuji 5 Nov 2026 dari luar: 340 request dengan alamat palsu yang berbeda-beda tetap kena 429 setelah request ke-300, dan alamat palsu itu tidak muncul di log.
 - State run di memori: `queued -> running (phase: setup|unwrap|exec|rules|explain|upload) -> done|error`. Run `error` disimpan di memori 1 jam (tidak ada report di S3), setelah itu 404.
 
-**SSE lewat Caddy.** Caddy mem-flush respons segera, mengabaikan `flush_interval`, kalau `Content-Type: text/event-stream`; kita tetap menulis `flush_interval -1` di `reverse_proxy` supaya eksplisit. Transport Caddy ke backend tidak punya `response_header_timeout` dan `read_timeout` secara default, jadi stream 90 detik tidak diputus ([docs reverse_proxy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)). Tidak ada directive `encode` (kompresi bisa menahan chunk). HTTP/3 dimatikan (`protocols h1 h2`, bagian 12) supaya cuma ada satu jalur yang perlu diuji; SSE jalan normal di atas HTTP/2. Di sisi Node: `res.writeHead(200, {"Content-Type":"text/event-stream; charset=utf-8","Cache-Control":"no-cache, no-transform","X-Accel-Buffering":"no"})` lalu `res.flushHeaders()`. Timer Node tidak mengganggu: `server.requestTimeout` (default 300 detik) hanya menghitung waktu **menerima** request, dan `server.timeout` default 0 ([node:http](https://nodejs.org/docs/latest-v24.x/api/http.html)). Heartbeat: baris komentar `: hb <ts_ms>` tiap 15 detik, persis saran spec supaya proxy lama tidak menutup koneksi idle ([WHATWG SSE](https://html.spec.whatwg.org/multipage/server-sent-events.html)).
+**SSE lewat nginx.** Lokasi `/api/runs/<id>/events` memakai `proxy_buffering off` dan `gzip off`, jadi tiap event langsung diteruskan; header `X-Accel-Buffering: no` dari Node juga dihormati nginx. `proxy_read_timeout` tetap default 60 s karena heartbeat 15 s menjaga koneksi. HTTP/3 tidak diaktifkan supaya cuma ada satu jalur yang perlu diuji; SSE jalan normal di atas HTTP/2. Di sisi Node: `res.writeHead(200, {"Content-Type":"text/event-stream; charset=utf-8","Cache-Control":"no-cache, no-transform","X-Accel-Buffering":"no"})` lalu `res.flushHeaders()`. Timer Node tidak mengganggu: `server.requestTimeout` (default 300 detik) hanya menghitung waktu **menerima** request, dan `server.timeout` default 0 ([node:http](https://nodejs.org/docs/latest-v24.x/api/http.html)). Heartbeat: baris komentar `: hb <ts_ms>` tiap 15 detik, persis saran spec supaya proxy lama tidak menutup koneksi idle ([WHATWG SSE](https://html.spec.whatwg.org/multipage/server-sent-events.html)).
 
 **Reconnect (Last-Event-ID).** Tiap message SSE punya `id: <n>`, counter per run mulai dari 1 (bukan `seq` evidence; `seq` ada di dalam payload). Browser reconnect otomatis saat koneksi putus dan mengirim header `Last-Event-ID` berisi id terakhir yang ia terima ([spec](https://html.spec.whatwg.org/multipage/server-sent-events.html)). Server membalas dengan replay semua message `n > Last-Event-ID` dari ring buffer run (disimpan sampai `run.done`/`run.error` + 10 menit; maksimum 5000 message / 4 MiB), lalu lanjut live. `?after=<n>` adalah jalur yang sama untuk JS yang membuka stream baru setelah reload halaman (EventSource tidak bisa mengisi `Last-Event-ID` secara manual; tanpa `after`, replay dari awal dan UI membangun ulang timeline). Baris pertama stream selalu `retry: 2000`. Kalau run sudah selesai dan buffer sudah dibuang, server menjawab `204 No Content`; spec menjamin klien berhenti reconnect pada 204, dan `web/sse.js` lanjut mengambil report lewat `GET /api/runs/:id`. Setelah `run.done`/`run.error` server menutup stream, dan `sse.js` **wajib** memanggil `es.close()`; kalau tidak, browser akan reconnect terus (ini perilaku default EventSource, bukan bug).
 
@@ -1035,7 +1035,7 @@ new S3Client({
 | `/srv/firstrun/runs/<id>/sinkhole/` | `events.jsonl`, `dns.log`, `tcp.jsonl`, `bodies/` | Setelah report terbentuk dan ter-upload. Kalau run gagal: disimpan 0700 maksimum 24 jam untuk debugging, lalu janitor hapus |
 | `/srv/firstrun/trace/<container_id>.jsonl` | JSONL trace dari sidecar | Saat teardown; file yatim > 10 menit disapu janitor |
 | `/srv/firstrun/spool/<id>.json` | report yang gagal di-PUT | Retry tiap 60 detik maksimum 24 jam; terhapus setelah PUT sukses; `GET /api/runs/:id` juga membaca spool |
-| journald (`firstrun`, `firstrun-sink`, `caddy`) | log operasional (tanpa command/canary/kode) | `MaxRetentionSec=7day`, `SystemMaxUse=1G` ([journald.conf](https://www.freedesktop.org/software/systemd/man/latest/journald.conf.html)) |
+| journald (`firstrun`, `firstrun-sink`) | log operasional (tanpa command/canary/kode) | `MaxRetentionSec=7day`, `SystemMaxUse=1G` ([journald.conf](https://www.freedesktop.org/software/systemd/man/latest/journald.conf.html)) |
 | Object Storage `reports/` | report JSON | Janitor harian menghapus objek lebih tua dari `FIRSTRUN_REPORT_TTL_DAYS` (default 30) lewat `ListObjectsV2` + `DeleteObject`; bucket lifecycle (didukung menurut compat matrix) hanya sebagai lapisan kedua, bukan satu-satunya |
 
 Disk guard: kalau ruang kosong `/srv` < 2 GB, `POST /api/runs` menjawab `503 runs_disabled` dan `/healthz` `storage: "degraded"`.
@@ -1052,7 +1052,7 @@ URL publik yang mengeksekusi teks yang di-paste orang adalah target abuse by des
 |---|---|---|
 | Rate limit per IP | `POST /api/runs`: 5 per 10 menit dan 20 per jam. Access code salah: 10 per jam, setelah itu semua POST dari IP itu 429 selama 1 jam (anti brute-force). `GET /api/runs/:id`: 120/menit. SSE: 4 koneksi bersamaan, 30 pembukaan/menit. GET lain: 300/menit. Token bucket di `Map` (`http/ratelimit.mjs`), dipangkas tiap 60 detik, maksimum 10.000 key (LRU) | `for i in $(seq 6); do curl -s -o /dev/null -w '%{http_code}\n' -X POST …; done` -> `429` pada ke-6 dengan `Retry-After` |
 | Rate limit global | 60 run/jam untuk seluruh instance (tidak menghitung yang ditolak); concurrency 2, antrian 8 (bagian 4); SSE global 100 koneksi | `/healthz` `active_runs`, `queued`; counter `rate_limited`, `queue_rejections` |
-| Batas input | body 64 KiB (Caddy `request_body max_size 64KB` menjawab 413 ([docs](https://caddyserver.com/docs/caddyfile/directives/request_body)) **dan** router), command 16 KiB, claim 300 char, `sample_id` regex, output LLM 64 KiB, stdout/stderr 1 MiB (preview 32 KiB), 5000 event/run, report 4 MiB, body request sinkhole 2 MB (`body_size_limit`) | Unit test `server/test/validate.test.mjs` |
+| Batas input | body 64 KiB (router menjawab 413 berisi JSON; nginx `client_max_body_size 128k` menolak yang jauh lebih besar lebih awal), command 16 KiB, claim 300 char, `sample_id` regex, output LLM 64 KiB, stdout/stderr 1 MiB (preview 32 KiB), 5000 event/run, report 4 MiB, body request sinkhole 2 MB (`body_size_limit`) | Unit test `server/test/validate.test.mjs` |
 | Sample publik vs free-form | `sample_id` (fixture tulisan tim, aman by construction) terbuka untuk siapa pun; input bebas butuh `x-firstrun-access-code` (>= 24 char acak, `FIRSTRUN_ACCESS_CODE`); `FIRSTRUN_FREEFORM=0` mematikan input bebas sama sekali. UI menyimpan kode di `sessionStorage` | POST free-form tanpa header -> 401 |
 | Tidak ada shell di host | Semua pemanggilan Docker lewat `execFile("/usr/bin/docker", argv, {shell:false, env: MINIMAL_ENV, timeout})` di `run/docker.mjs`; argv dibangun dari konstanta + `run_id` tervalidasi + `sample_id` tervalidasi. Teks command hanya lewat `fs.writeFile` ke `work/cmd.sh`, tidak pernah jadi argumen. Harness LLM ditulis ke `work/harness.<ext>` dengan `ext` dan interpreter dari allowlist (`sh,py,js,ps1`). Format string `docker inspect -f` konstan | Test `server/test/no-shell.test.mjs` grep `child_process.exec(`, `spawn(.*shell`, template literal di argv -> gagal CI |
 | `MINIMAL_ENV` | `execFile` hanya mendapat `{PATH, HOME, LANG}`; `process.env` (key inference, S3, access code) tidak pernah diwariskan ke proses anak, jadi tidak bisa bocor ke `docker run` walau ada bug | Test: env proses anak tidak memuat `FIRSTRUN_S3_SECRET_KEY` |
@@ -1062,13 +1062,13 @@ URL publik yang mengeksekusi teks yang di-paste orang adalah target abuse by des
 | Sinkhole tidak punya jalan keluar | `--internal` + `gateway_mode_ipv4=isolated` (6.1); `scripts/netcheck.sh` dijalankan **setiap orchestrator start** sebagai self-test; gagal = `accepting_runs:false`, `/healthz` 503 (fail closed) | `checks.sinkhole_selftest` di `/healthz` |
 | Trace flood | Sandbox yang memanggil syscall jutaan kali per detik membebani sidecar: sidecar membaca dan membuang tanpa parse penuh setelah cap per container (bagian 7), orchestrator berhenti menormalisasi setelah 5000 event; backstop tetap wall clock 60 detik + `--cpus 1` | Fixture stress `fixtures/samples/` tidak dipublikasikan sebagai sample, hanya untuk uji hari 2 |
 | Output LLM | Semua respons LLM di-parse JSON + zod (`llm/schemas.mjs`); harness hanya jalan di sandbox tanpa network (bagian 4); `explanation` hanya teks via `textContent`; tidak ada jalur dari output LLM ke `execFile` selain nama file/interpreter yang di-allowlist | Test schema; review manual prompt |
-| Header respons | Caddy menambah `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, CSP `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`. Konsekuensi untuk `web/`: tidak ada inline `<script>`; semua JS di file | `curl -I https://<host>/` |
-| Log: retensi dan redaksi | Orchestrator log JSON satu baris ke stdout -> journald: `run_id`, `stage`, `ms`, `ip`, `status`, `command_sha256`, `command_bytes`; **tidak pernah** teks command, claim, nilai canary, access code, prompt/respons LLM (hanya ukuran + sha256). Nilai canary hanya ada di direktori run (dihapus) dan di report. Container `--log-driver none`. Caddy access log mati (default). journald `MaxRetentionSec=7day`, `SystemMaxUse=1G` | `journalctl -u firstrun \| grep -c FRQ` harus 0 setelah run dengan canary |
+| Header respons | nginx menambah `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, CSP `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`. Konsekuensi untuk `web/`: tidak ada inline `<script>`; semua JS di file | `curl -I https://<host>/` |
+| Log: retensi dan redaksi | Orchestrator log JSON satu baris ke stdout -> journald: `run_id`, `stage`, `ms`, `ip`, `status`, `command_sha256`, `command_bytes`; **tidak pernah** teks command, claim, nilai canary, access code, prompt/respons LLM (hanya ukuran + sha256). Nilai canary hanya ada di direktori run (dihapus) dan di report. Container `--log-driver none`. Access log nginx dimatikan (`access_log off`), jadi catatan request cuma ada di journald orchestrator dengan retensi 7 hari; error log nginx di `/var/log/nginx/error.log`. journald `MaxRetentionSec=7day`, `SystemMaxUse=1G` | `journalctl -u firstrun \| grep -c FRQ` harus 0 setelah run dengan canary |
 | Kill switch | `FIRSTRUN_KILL_SWITCH=1` di env (butuh `systemctl restart firstrun`) **atau** file `/srv/firstrun/KILL_SWITCH` (dicek tiap POST, tanpa restart). Efek: `POST /api/runs` 503 `runs_disabled`, `/healthz` `accepting_runs:false`, UI tampil banner; run yang sedang jalan dibiarkan selesai. Darurat total: `systemctl stop firstrun` lalu `docker rm -f $(docker ps -aq --filter label=firstrun.run)` | `touch /srv/firstrun/KILL_SWITCH; curl -X POST …` -> 503 |
 | Monitoring dasar | `/healthz` (docker ping via `docker version` di-cache 30 detik, socket sidecar ada + file heartbeat sidecar < 60 detik, self-test sinkhole saat start, `HeadBucket` di-cache 5 menit, disk) di-poll monitor eksternal gratis tiap 1-5 menit (opsional). Counter di `/healthz`: `runs_total`, `runs_failed`, `rate_limited`, `queue_rejections`. Rutinitas harian: `docker ps --filter label=firstrun.run` (harus kosong di luar run), `df -h /srv`, `journalctl -u firstrun --since -1h -p err`, `ss -tnp state established` (koneksi keluar hanya ke inference dan S3) | Checklist pagi di `docs/DEMO.md` |
 | `unattended-upgrades` | Aktif untuk patch keamanan; reboot kernel manual di luar jam demo | `systemctl status unattended-upgrades` |
 
-**Kalau VM terlihat dikompromi** (container tanpa label `firstrun.run`, proses asing memakan CPU, koneksi keluar ke IP tak dikenal, user/ssh key baru, `debsums -c` berubah, `/healthz` self-test tiba-tiba gagal): jangan diperbaiki di tempat. Urutan: (1) kill switch + `systemctl stop firstrun firstrun-sink caddy`; (2) di Vultr Firewall Group ubah inbound jadi hanya SSH dari IP tim; (3) rotasi semua kredensial dari console: API key Serverless Inference, access key Object Storage, access code, token DuckDNS; (4) salin apa yang perlu untuk forensik ringan (`journalctl -o export`, `docker ps -a`) ke laptop, lalu **destroy** instance, jangan snapshot untuk dipakai lagi; (5) deploy instance baru dan jalankan `infra/setup-vm.sh` (bagian 12), isi env dengan kredensial baru; (6) report lama di Object Storage tetap bisa dipakai (bucket private, key sudah dirotasi); kalau ada kecurigaan objek diubah, hapus prefix `reports/` saja. Tidak ada state di VM yang berharga; itu memang tujuannya.
+**Kalau VM terlihat dikompromi** (container tanpa label `firstrun.run`, proses asing memakan CPU, koneksi keluar ke IP tak dikenal, user/ssh key baru, `debsums -c` berubah, `/healthz` self-test tiba-tiba gagal): jangan diperbaiki di tempat. Urutan: (1) kill switch + `systemctl stop firstrun firstrun-sink nginx`; (2) di Vultr Firewall Group ubah inbound jadi hanya SSH dari IP tim; (3) rotasi semua kredensial dari console: API key Serverless Inference, access key Object Storage, access code, token DuckDNS; (4) salin apa yang perlu untuk forensik ringan (`journalctl -o export`, `docker ps -a`) ke laptop, lalu **destroy** instance, jangan snapshot untuk dipakai lagi; (5) deploy instance baru dan jalankan `infra/setup-vm.sh` (bagian 12), isi env dengan kredensial baru; (6) report lama di Object Storage tetap bisa dipakai (bucket private, key sudah dirotasi); kalau ada kecurigaan objek diubah, hapus prefix `reports/` saja. Tidak ada state di VM yang berharga; itu memang tujuannya.
 
 ---
 
@@ -1076,7 +1076,7 @@ URL publik yang mengeksekusi teks yang di-paste orang adalah target abuse by des
 
 Urutan untuk hari 1. Semua perintah di VM dijalankan sebagai user `deploy` dengan `sudo`, kecuali disebutkan. `infra/setup-vm.sh` mengotomatiskan langkah 6-13 dan 17 secara idempotent (dipakai juga saat recovery, bagian 11); langkah lain manual di console.
 
-1. **Plan VM.** Cloud Compute **High Performance** `vhp-2c-4gb-amd` (2 vCPU, 4 GB, 100 GB NVMe, 5 TB bandwidth): $24/bulan, $0.033/jam. Alternatif: `vc2-2c-4gb` (Regular, 2 vCPU/4 GB) $20/bulan, $0.027/jam; `vhp-4c-8gb-amd` $48/bulan, $0.066/jam kalau mau longgar. Angka dari API publik `GET https://api.vultr.com/v2/plans` tanggal 3 Nov 2026; halaman harga Vultr menjawab 403 saat dicek, jadi tampilan di console **UNVERIFIED**, anggap bisa berbeda. Kenapa 4 GB cukup: 2 run paralel x (512 MB sandbox + 256 MB sinkhole) + overhead sentry runsc + dockerd + Node + Caddy ~ 2.5-3 GB; kenapa High Performance: gVisor systrap CPU-bound. KVM/nested virtualization tidak dibutuhkan (platform systrap).
+1. **Plan VM.** Cloud Compute **High Performance** `vhp-2c-4gb-amd` (2 vCPU, 4 GB, 100 GB NVMe, 5 TB bandwidth): $24/bulan, $0.033/jam. Alternatif: `vc2-2c-4gb` (Regular, 2 vCPU/4 GB) $20/bulan, $0.027/jam; `vhp-4c-8gb-amd` $48/bulan, $0.066/jam kalau mau longgar. Angka dari API publik `GET https://api.vultr.com/v2/plans` tanggal 3 Nov 2026; halaman harga Vultr menjawab 403 saat dicek, jadi tampilan di console **UNVERIFIED**, anggap bisa berbeda. Kenapa 4 GB cukup: 2 run paralel x (512 MB sandbox + 256 MB sinkhole) + overhead sentry runsc + dockerd + Node + nginx ~ 2.5-3 GB; kenapa High Performance: gVisor systrap CPU-bound. KVM/nested virtualization tidak dibutuhkan (platform systrap).
 2. **Region.** `sgp` (Singapore): dekat tim, Object Storage `sgp1` ada di region yang sama (semua plan di atas tersedia di `sgp` menurut API). Serverless Inference endpoint global (`api.vultrinference.com`), tidak terikat region.
 3. **Firewall Group** (console: Products > Network > Firewall; path persis **UNVERIFIED**): buat grup `firstrun`, inbound IPv4: TCP 22 dari IP tim (atau Anywhere kalau IP tim berubah-ubah; login password mati, lihat langkah 6), TCP 80 Anywhere, TCP 443 Anywhere. Tidak ada rule IPv6 (IPv6 tidak diaktifkan di instance). Pasang ke instance saat deploy.
 4. **SSH key.** Upload public key tim ke console (Account > SSH Keys), pilih saat deploy. Tidak ada password login sejak awal.
@@ -1148,42 +1148,13 @@ Urutan untuk hari 1. Semua perintah di VM dijalankan sebagai user `deploy` denga
     `firstrun` **tidak** dimasukkan ke grup `docker` lewat `usermod`; akses socket diberikan hanya ke unit lewat `SupplementaryGroups=docker` (langkah 17).
 12. **Node.js 24.** Repo NodeSource tanpa menjalankan script `setup_24.x` (ironis untuk proyek ini): key `https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key` -> `/etc/apt/keyrings/nodesource.gpg`, sumber `URIs: https://deb.nodesource.com/node_24.x/` di `/etc/apt/sources.list.d/nodesource.sources`, lalu `sudo apt update && sudo apt -y install nodejs` ([panduan manual NodeSource](https://github.com/nodesource/distributions/wiki/Repository-Manual-Installation); Noble didukung). Alternatif tanpa repo pihak ketiga: tarball resmi nodejs.org + verifikasi `SHASUMS256.txt` ke `/usr/local/lib/nodejs`. Cek `node --version` -> `v24.x`.
 13. **Kode + image.** `sudo git clone <repo> /opt/firstrun && sudo chown -R deploy:firstrun /opt/firstrun && cd /opt/firstrun/server && npm ci --omit=dev` (dependensi runtime hanya `zod`, `@aws-sdk/client-s3`). Lalu `scripts/gen-test-ca.sh` (6.4, output masuk `.gitignore`) dan `scripts/build-images.sh` (build `firstrun/sandbox:latest` dan `firstrun/sinkhole:latest` dalam satu sesi, menyalin `fixtures/samples/*/canned.json` ke image sinkhole). `sudo -u firstrun docker image ls` memverifikasi image terlihat (image milik daemon, bukan user).
-14. **Hostname.** Pilihan A (disarankan) **DuckDNS**: buat akun, subdomain `firstrun` -> `firstrun.duckdns.org`, set IP dengan `curl "https://www.duckdns.org/update?domains=firstrun&token=<token>&ip=<ip VM>"` -> balasan `OK` ([spec](https://www.duckdns.org/spec.jsp)). `duckdns.org` ada di Public Suffix List (seksi PRIVATE DOMAINS, [daftar](https://publicsuffix.org/list/public_suffix_list.dat)), dan Let's Encrypt memakai PSL untuk menentukan "registered domain", jadi subdomain kita punya kuota sendiri 50 sertifikat/7 hari, bukan berbagi dengan semua pengguna DuckDNS ([rate limits](https://letsencrypt.org/docs/rate-limits/)). Pilihan B **nip.io**: `firstrun.<ip-dengan-dash>.nip.io`, nol setup, tapi `nip.io` tidak ada di PSL (dicek di seluruh daftar), jadi semua pengguna nip.io berbagi kuota registered domain yang sama; nip.io bilang Let's Encrypt sudah menaikkan kuota mereka sampai 250.000 ([nip.io](https://nip.io/)), tapi itu di luar kendali kita, dan hostname berisi IP terlihat mencurigakan di demo (beberapa vendor keamanan memblok domain seperti ini, **UNVERIFIED**). Dua-duanya memakai HTTP-01 lewat port 80/443 yang Caddy pegang; token DuckDNS disimpan hanya di `/etc/firstrun/firstrun.env` (tidak dipakai orchestrator; cukup untuk cron `*/30 * * * *` update IP kalau perlu). Jangan ganti-ganti hostname saat uji coba: limit "5 sertifikat untuk set identifier yang sama per 7 hari" dan "5 kegagalan validasi per jam" cepat habis; Caddy otomatis fallback ke ZeroSSL kalau Let's Encrypt menolak.
-15. **Caddy** dari repo resmi ([install](https://caddyserver.com/docs/install)):
-    ```bash
-    sudo apt -y install debian-keyring debian-archive-keyring apt-transport-https curl
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-    sudo chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg /etc/apt/sources.list.d/caddy-stable.list
-    sudo apt update && sudo apt -y install caddy      # service systemd "caddy" langsung aktif
-    ```
-    `infra/caddy/Caddyfile` -> `/etc/caddy/Caddyfile`:
-    ```caddyfile
-    {
-      email ops@example.com
-      servers {
-        protocols h1 h2
-      }
-    }
+14. **Hostname.** Yang dipakai: `firstrun.makmurlab.com`, A record ke IP VM. Alternatif kalau tidak punya domain: Pilihan A **DuckDNS**: buat akun, subdomain `firstrun` -> `firstrun.duckdns.org`, set IP dengan `curl "https://www.duckdns.org/update?domains=firstrun&token=<token>&ip=<ip VM>"` -> balasan `OK` ([spec](https://www.duckdns.org/spec.jsp)). `duckdns.org` ada di Public Suffix List (seksi PRIVATE DOMAINS, [daftar](https://publicsuffix.org/list/public_suffix_list.dat)), dan Let's Encrypt memakai PSL untuk menentukan "registered domain", jadi subdomain kita punya kuota sendiri 50 sertifikat/7 hari, bukan berbagi dengan semua pengguna DuckDNS ([rate limits](https://letsencrypt.org/docs/rate-limits/)). Pilihan B **nip.io**: `firstrun.<ip-dengan-dash>.nip.io`, nol setup, tapi `nip.io` tidak ada di PSL (dicek di seluruh daftar), jadi semua pengguna nip.io berbagi kuota registered domain yang sama; nip.io bilang Let's Encrypt sudah menaikkan kuota mereka sampai 250.000 ([nip.io](https://nip.io/)), tapi itu di luar kendali kita, dan hostname berisi IP terlihat mencurigakan di demo (beberapa vendor keamanan memblok domain seperti ini, **UNVERIFIED**). Dua-duanya memakai HTTP-01 lewat port 80/443 yang Caddy pegang; token DuckDNS disimpan hanya di `/etc/firstrun/firstrun.env` (tidak dipakai orchestrator; cukup untuk cron `*/30 * * * *` update IP kalau perlu). Jangan ganti-ganti hostname saat uji coba: limit "5 sertifikat untuk set identifier yang sama per 7 hari" dan "5 kegagalan validasi per jam" cepat habis; Caddy otomatis fallback ke ZeroSSL kalau Let's Encrypt menolak.
+15. **nginx dan certbot.** Rencana awal memakai Caddy; saat go-live 5 Nov 2026 diganti nginx dan certbot atas pilihan tim. `sudo bash infra/setup-https.sh <hostname>`, dipanggil juga oleh `setup-vm.sh` kalau `FIRSTRUN_HOSTNAME` diisi, dan aman dijalankan ulang:
+    1. Pasang paket apt `nginx` dan `certbot`, buang site `default`, pasang `infra/nginx/firstrun-http.conf` (port 80: tantangan Let's Encrypt di `/var/www/certbot`, sisanya redirect ke HTTPS).
+    2. Coba minta sertifikat ke server staging (`--dry-run`), supaya DNS atau port yang salah tidak memakan batas kegagalan server asli. Lalu minta yang asli: `certbot certonly --webroot` dengan `--deploy-hook 'systemctl reload nginx'`. Tanpa `CERTBOT_EMAIL` tidak ada alamat yang didaftarkan, jadi Let's Encrypt tidak mengirim peringatan kedaluwarsa; `certbot.timer` yang memperbarui sertifikat.
+    3. Pasang `infra/nginx/firstrun-https.conf` (port 443), isi `FIRSTRUN_PUBLIC_URL`, restart service.
 
-    firstrun.duckdns.org {
-      request_body {
-        max_size 64KB
-      }
-      header {
-        Strict-Transport-Security "max-age=31536000"
-        X-Content-Type-Options "nosniff"
-        X-Frame-Options "DENY"
-        Referrer-Policy "no-referrer"
-        Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
-        -Server
-      }
-      reverse_proxy 127.0.0.1:3000 {
-        flush_interval -1
-      }
-    }
-    ```
-    `protocols h1 h2` dan `email` adalah global option resmi; admin API tetap default `localhost:2019` (tidak terekspos) ([options](https://caddyserver.com/docs/caddyfile/options)). Tidak ada `encode`, tidak ada `log` (privasi; lihat bagian 11). `sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy`, tunggu sertifikat (`journalctl -u caddy -f`), lalu `curl -I https://firstrun.duckdns.org/healthz` (502 wajar sebelum orchestrator jalan; yang penting TLS valid).
+    Isi `firstrun-https.conf`: TLS 1.2 dan 1.3, HTTP/2, header keamanan (bagian 11), `X-Forwarded-For` ditimpa (10.1), SSE tanpa buffering (10.1), tanpa access log. Koneksi yang tidak menyebut hostname kita ditolak: port 80 `return 444`, port 443 `ssl_reject_handshake on`. Cek: `curl -I https://<hostname>/healthz` dan `sudo bash scripts/smoke.sh https://<hostname>`.
 16. **Object Storage.** Console: Products > Cloud Storage > Object Storage > Add (path **UNVERIFIED**), lokasi `sgp1`, tier Standard ($18/bulan, 10.4). Setelah aktif, halaman subscription menampilkan hostname `sgp1.vultrobjects.com`, Access Key, Secret Key ([docs s3cmd](https://docs.vultr.com/how-to-use-s3cmd-with-vultr-object-storage)). Buat bucket `firstrun-reports-<acak>` private. Isi `FIRSTRUN_S3_ENDPOINT`, `FIRSTRUN_S3_BUCKET`, `FIRSTRUN_S3_ACCESS_KEY`, `FIRSTRUN_S3_SECRET_KEY`. Tes dari VM: `node server/bin/report.mjs selftest` (PutObject + GetObject + DeleteObject key `selftest/<ts>.json`; sekaligus memastikan `forcePathStyle` dan checksum `WHEN_REQUIRED` diterima Vultr).
 17. **Serverless Inference.** Console: Products > Serverless > Inference > Add Serverless Inference, isi label, setujui catatan biaya ([provisioning](https://docs.vultr.com/products/compute/serverless-inference/provisioning)); API key ada di halaman subscription (persisnya **UNVERIFIED**; `.env.example` sudah menunjuk ke sana). Harga **UNVERIFIED** (halaman 404/403 saat dicek; hasil pencarian menyebut kuota 50 juta token per subscription dan overage $0.0002 per 1.000 token; baca catatan biaya di console saat provisioning). Isi `VULTR_INFERENCE_API_KEY`, lalu `node --env-file=/etc/firstrun/firstrun.env scripts/probe-vultr-inference.mjs`: pilih model dengan kolom `chat: yes` dan `json_schema: yes` (desain tidak butuh tool calling, Lampiran B), tulis ke `server/llm/config.json` (bagian 8: `model` dan `fallback_model` per panggilan, boleh model yang sama). Kalau tidak ada yang lolos `json_schema`, pakai `response_format: {type:"json_object"}` + zod + retry (sudah jalur default `server/llm/client.mjs`).
 18. **systemd units** (`infra/systemd/*.service` -> `/etc/systemd/system/`, lalu `sudo systemctl daemon-reload && sudo systemctl enable --now firstrun-sink firstrun`). Antarmuka sidecar -> orchestrator yang dipakai di sini: file `/srv/firstrun/trace/<container_id>.jsonl`, satu per container, dibuat sidecar saat event pertama (pola tail yang sama dengan `sinkhole/events.jsonl`); `--stdout` untuk mode debug. Ini mekanisme yang sama dengan bagian 7.2.
@@ -1215,7 +1186,7 @@ Urutan untuk hari 1. Semua perintah di VM dijalankan sebagai user `deploy` denga
     # firstrun.service
     [Unit]
     Description=FirstRun orchestrator
-    Wants=firstrun-sink.service docker.service caddy.service
+    Wants=firstrun-sink.service docker.service nginx.service
     After=network-online.target docker.service firstrun-sink.service
 
     [Service]
@@ -1351,8 +1322,9 @@ firstrun/
 │   ├── systemd/
 │   │   ├── firstrun.service
 │   │   └── firstrun-sink.service
-│   ├── caddy/Caddyfile
+│   ├── nginx/                     # firstrun-http.conf, firstrun-https.conf
 │   ├── journald/firstrun.conf     # MaxRetentionSec=7day, SystemMaxUse=1G
+│   ├── setup-https.sh             # nginx + certbot, aman dijalankan ulang
 │   └── setup-vm.sh                # idempotent: langkah 6-13 dan 17 bagian 12; dipakai juga untuk recovery
 ├── fixtures/
 │   └── samples/                   # 3 sample tulisan tim (bagian 15.2): nvm/, canary/, shim/
@@ -1395,7 +1367,7 @@ Semua jam di bagian ini **WIB (UTC+7)**. Salt Lake City sudah lepas DST sejak Mi
 
 | Workstream | Isi | Siapa (usulan) | Tempat kerja |
 |---|---|---|---|
-| **A: sandbox + network + evidence** | VM, Docker + runsc, image sandbox dan sinkhole, test CA, network `--internal` + sinkhole, sidecar `gvisor-sink.py`, normalizer, fallback strace, systemd, Caddy, snapshot, runbook | Teammate 1 (paling nyaman Linux/Docker) | VM via SSH / VS Code Remote |
+| **A: sandbox + network + evidence** | VM, Docker + runsc, image sandbox dan sinkhole, test CA, network `--internal` + sinkhole, sidecar `gvisor-sink.py`, normalizer, fallback strace, systemd, nginx, snapshot, runbook | Teammate 1 (paling nyaman Linux/Docker) | VM via SSH / VS Code Remote |
 | **B: agent loop + rules + API + UI** | Orchestrator Node: API, queue, SSE, lifecycle run, canary generator + matcher, decoder, LLM client (harness/contract/explanation), rules, report, Object Storage, abuse controls, web UI | Builder | VM via VS Code Remote (Node dan Python ada di VM; Windows hanya editor dan browser) |
 | **C: fixtures + materi submission** | 3 fixture curated + canned response nvm, `expected.json`, script regression demo, skrip video, rekaman, slides, README + setup docs, cover image, teks form submission | Teammate 2; kalau cuma berdua, builder pegang C mulai hari 4 dan A/B saling cover | Windows lokal (teks, slide, video); fixture diuji di VM |
 
@@ -1480,7 +1452,7 @@ Tujuan hari ini cuma satu: sebelum tidur, tahu apakah empat asumsi dasar benar, 
 #### Hari 4 — Jumat 6 Nov: publik dan bisa dipakai orang lain
 
 **A**
-- Caddy: `reverse_proxy 127.0.0.1:3000` dengan `flush_interval -1` untuk SSE, auto HTTPS di hostname hari 1 (nyalakan hanya setelah DNS resolve, supaya tidak membakar rate limit Let's Encrypt). Unit systemd: `firstrun-sink.service` (sidecar, start sebelum job runsc apa pun) dan `firstrun.service` (`Restart=always`, `ExecStartPre=scripts/selfcheck.sh`).
+- nginx dan certbot (`infra/setup-https.sh`): proxy ke `127.0.0.1:3000`, SSE tanpa buffering, HTTPS di hostname publik (nyalakan hanya setelah DNS resolve; skripnya mencoba server staging dulu supaya tidak membakar rate limit Let's Encrypt). Unit systemd: `firstrun-sink.service` (sidecar, start sebelum job runsc apa pun) dan `firstrun.service` (`Restart=always`, `ExecStartPre=scripts/selfcheck.sh`).
 - Housekeeping: hapus `runs/<id>` setelah report terkirim, logrotate, cek disk; snapshot VM "day4-public". Kalau pakai VM kedua: restore snapshot, pindahkan A record, dev tetap di VM lama.
 
 **B**
@@ -1526,7 +1498,7 @@ Urutan drop kalau tertinggal; yang paling atas dipotong lebih dulu. Keputusan di
 5. Explanation LLM -> template deterministik.
 6. `tcpsink.py` UDP (port asli) -> cukup TCP + trace point `connect`.
 7. Rate limit per IP -> global saja + access code.
-8. Timeline SSE -> polling `GET /api/runs/:id` tiap 2 detik (hanya kalau SSE bermasalah lewat Caddy).
+8. Timeline SSE -> polling `GET /api/runs/:id` tiap 2 detik (hanya kalau SSE bermasalah lewat nginx).
 9. Polish CSS, dark mode, animasi.
 
 Tidak pernah dipotong: resource cap + network `--internal` + teardown `finally` + janitor; canary + sinkhole + matcher; rules deterministik; access code untuk command custom; tiga fixture + video + README. Object Storage juga dipertahankan: kira-kira 1 jam kerja dan termasuk "Vultr services" yang dinilai.
@@ -1634,7 +1606,7 @@ Yang **tidak** ditampilkan: isi fixture mentah, nilai `.env` host, halaman conso
 | R8 | Kebijakan hosting: AUP Vultr soal menjalankan kode untrusted; aturan lablab soal konten berbahaya di repo | Kebijakan | Rendah-sedang | Tinggi | Tidak pernah menyimpan atau menjalankan payload pihak ketiga; fixture tulisan tim dan jinak; sandbox tanpa egress, jadi VM tidak bisa menyerang siapa pun; dijelaskan di README; baca AUP hari 1 (UNVERIFIED) | Mode curated-only; command custom hanya untuk pemegang code |
 | R9 | Jadwal: 6 hari, 2-3 orang, satu VM dipakai bersama | Jadwal | Tinggi | Tinggi | Gate hari 3; cut line 14.3; freeze Sabtu 18:00 WIB; checkpoint harian | Kirim dengan decoder deterministik, decoy inti, 2 fixture, explanation template |
 | R10 | VM tunggal bermasalah saat penjurian (disk penuh, dockerd hang, reboot) | Demo | Sedang | Tinggi | systemd `Restart=always`, selfcheck, hapus `runs/<id>` selesai run, snapshot v1-freeze, no deploy setelah submit, on-call | Restore snapshot (runbook); share link cache; video |
-| R11 | TLS publik gagal (DNS belum propagasi, rate limit Let's Encrypt) | Demo | Rendah-sedang | Sedang | A record dibuat hari 1; Caddy dinyalakan setelah DNS resolve | Caddy jatuh ke ZeroSSL otomatis; hostname nip.io |
+| R11 | TLS publik gagal (DNS belum propagasi, rate limit Let's Encrypt) | Demo | Rendah-sedang | Sedang | A record dibuat dulu; `setup-https.sh` mencoba server staging sebelum server asli | Hostname lain (DuckDNS, nip.io) |
 | R12 | Rekaman demo rewel (timing, LLM lambat) | Demo | Sedang | Sedang | 2-3 take per fixture; cache LLM untuk sample (Q14) | Report cache + screenshot |
 | R13 | Rahasia bocor ke repo atau video (key Inference, S3, access code, test CA key) | Keamanan | Rendah | Tinggi | `.env` dan output `gen-test-ca.sh` di `.gitignore`; `git grep` sebelum push; blur console; code juri terpisah dari code tim | Rotate key di console Vultr saat itu juga |
 | R14 | Salah hitung zona waktu deadline | Jadwal | Sedang | Kritis | Verifikasi hari 1 (14.4); target internal = deadline - 6 jam, selalu ditulis WIB | Tidak ada; buffer itulah fallback-nya |
@@ -1673,7 +1645,7 @@ Yang **tidak** ditampilkan: isi fixture mentah, nilai `.env` host, halaman conso
 - **Docker `--tmpfs`** (size/mode/uid/gid): https://docs.docker.com/engine/storage/tmpfs/ ; tmpfs gVisor mem-parse mode/uid/gid/size di `pkg/sentry/fsimpl/tmpfs/tmpfs.go` ; DNS bawaan Docker: https://docs.docker.com/engine/network/
 - **mitmproxy:** mode https://docs.mitmproxy.org/stable/concepts/modes/ ; transparent mode dengan iptables REDIRECT https://docs.mitmproxy.org/stable/howto/transparent/ ; sertifikat dan custom CA https://docs.mitmproxy.org/stable/concepts/certificates/ ; opsi (`connection_strategy`, `upstream_cert`, `body_size_limit`, `block_global`) https://docs.mitmproxy.org/stable/concepts/options/ ; hook (`server_connect`, `tls_clienthello`, `tcp_start`) https://docs.mitmproxy.org/stable/api/events.html ; image resmi jalan sebagai root kecuali entrypoint melihat perintah `mitm*`: https://github.com/mitmproxy/mitmproxy/blob/main/release/docker/Dockerfile
 - **dnsmasq wildcard** `--address=/#/IP`: https://thekelleys.org.uk/dnsmasq/docs/dnsmasq-man.html
-- **Caddy automatic HTTPS** (butuh A record dan port 80/443): https://caddyserver.com/docs/automatic-https , install: https://caddyserver.com/docs/install ; hostname cepat: https://www.duckdns.org/spec.jsp , https://nip.io/
+- **certbot** (webroot, renew, hook; butuh A record dan port 80): https://eff-certbot.readthedocs.io/en/stable/using.html ; **nginx** `proxy_buffering` dan `ssl_reject_handshake`: https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering , https://nginx.org/en/docs/http/ngx_http_ssl_module.html#ssl_reject_handshake ; hostname cepat: https://www.duckdns.org/spec.jsp , https://nip.io/
 - **Vultr Serverless Inference** (base `https://api.vultrinference.com/v1`, Bearer key, `GET /v1/models`, `POST /v1/chat/completions`): https://docs.vultr.com/products/compute/serverless-inference/management/usage/chat , https://docs.vultr.com/products/serverless-inference
 - **Vultr Object Storage** (S3-compatible, wajib HTTPS, endpoint `<region>.vultrobjects.com`, misalnya sgp1/ewr1/ams1/sjc1): https://docs.vultr.com/how-to-use-s3cmd-with-vultr-object-storage , https://docs.vultr.com/products/storage/object-storage/s3-compatibility-matrix
 - **Fixture installer jinak:** nvm tag terbaru v0.40.8 (2026-09-21)

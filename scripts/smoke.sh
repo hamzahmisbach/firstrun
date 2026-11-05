@@ -33,8 +33,10 @@ fail() { FAILED=$((FAILED + 1)); echo "FAIL $*"; }
 skip() { echo "SKIP $*"; }
 step() { printf '\n== step %s: %s\n' "$1" "$2"; }
 
-post() { # body -> "<status>\n<body>"
-  curl -s -o /tmp/smoke-body.$$ -w '%{http_code}' -X POST -H 'content-type: application/json' "$@" "$BASE/api/runs" --data "$1"
+post() { # body [curl options] -> status; the response body goes to /tmp/smoke-body.$$
+  local body="$1"
+  shift
+  curl -s -o /tmp/smoke-body.$$ -w '%{http_code}' -X POST -H 'content-type: application/json' "$@" "$BASE/api/runs" --data "$body"
 }
 
 # Poll GET /api/runs/:id until done/error; prints the final JSON.
@@ -72,7 +74,7 @@ if [[ "$BASE" == https://* ]]; then
     if grep -qi "^$h:" <<<"$headers"; then pass "header $h"; else fail "header $h missing"; fi
   done
 else
-  skip "security headers (local URL, no Caddy in front)"
+  skip "security headers (local URL, no nginx in front)"
 fi
 
 step 5-6 "curated samples nvm (CLEAN) and canary (MALICIOUS, alert, decoy aws_secret)"

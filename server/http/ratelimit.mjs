@@ -6,7 +6,7 @@ import { LIMITS } from '../config.mjs';
 const LOOPBACK = new Set(['127.0.0.1', '::ffff:127.0.0.1', '::1']);
 
 /**
- * Client IP: the last X-Forwarded-For value when the peer is loopback (Caddy replaces the header
+ * Client IP: the last X-Forwarded-For value when the peer is loopback (nginx replaces the header
  * with the address it saw, section 10.1), otherwise the TCP peer address.
  */
 export function clientIp(req) {

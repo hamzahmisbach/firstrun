@@ -317,10 +317,10 @@ export function verdictLead(level) {
 
 export const levelClass = (level) => (level === 'MALICIOUS' ? 'bad' : level === 'SUSPICIOUS' ? 'warn' : level === 'CLEAN' ? 'ok' : 'none');
 
-/** Decorative glyph next to the verdict word (text, so it needs no SVG and inherits the colour). */
-export function verdictIcon(level) {
-  const glyph = level === 'MALICIOUS' ? '✕' : level === 'SUSPICIOUS' ? '!' : level === 'CLEAN' ? '✓' : '?';
-  return el('span', { class: 'verdict-icon', 'aria-hidden': 'true', 'data-glyph': glyph });
+/** The verdict word as a rubber stamp. It stays text, so a screen reader hears "Verdict: Malicious". */
+export function verdictStamp(level, { tag = 'p', id } = {}) {
+  const word = VERDICT_WORD[level] ?? (str(level, 20) || 'No verdict');
+  return el(tag, { class: 'stamp', id }, [el('span', { class: 'visually-hidden', text: 'Verdict: ' }), word]);
 }
 
 export const SEVERITY_LABEL = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low', info: 'Note' };
@@ -391,49 +391,63 @@ export function createRunView(root, opts = {}) {
   let phase = -1;
   let verdictLevel = null;
 
-  const steps = PHASES.map(([id, label]) => el('li', { class: 'step', 'data-phase': id }, [el('span', { class: 'step-bar', 'aria-hidden': 'true' }), el('span', { class: 'step-label', text: label })]));
-  const stepList = el('ol', { class: 'steps', 'aria-label': 'Progress' }, steps);
+  const steps = PHASES.map(([id, label]) => el('li', { class: 'step', 'data-phase': id, text: label }));
+  const stepList = el('ol', { class: 'rail', 'aria-label': 'Progress' }, steps);
   const status = el('p', { class: 'run-status', role: 'status' }, 'Waiting for the queue…');
-  const alertBox = el('section', { class: 'alert-banner', role: 'alert', hidden: true });
   const alertTitle = el('h2', { class: 'alert-title' });
   const alertList = el('ul', { class: 'alert-list' });
-  alertBox.append(
+  const alertBox = el('section', { class: 'alert', role: 'alert', hidden: true }, [
     el('div', { class: 'alert-mark', 'aria-hidden': 'true' }, '!'),
-    el('div', { class: 'alert-body' }, [
-      el('p', { class: 'alert-kicker', text: 'Caught in the sandbox' }),
-      alertTitle,
-      alertList,
-      el('p', { class: 'alert-note' }, 'Every credential in this sandbox was created for this run. The request was recorded by the fake network and never reached the internet. On your machine, this would have been your real key.'),
+    el('p', { class: 'alert-kicker', text: 'Caught in the sandbox' }),
+    alertTitle,
+    alertList,
+    el('p', { class: 'alert-note' }, 'Every credential in this sandbox was created for this run. The request was recorded by the fake network and never reached the internet. On your machine, this would have been your real key.'),
+  ]);
+  const verdictBox = el('section', { class: 'verdict-card', hidden: true, 'aria-live': 'polite' });
+  const errorBox = el('section', { class: 'error-box gap-bottom', role: 'alert', hidden: true });
+  const reconnect = el('p', { class: 'reconnect gap-bottom', role: 'status', hidden: true }, 'Connection lost. Reconnecting…');
+
+  // Left: what was declared. Right: what was found, printed line by line as it happens.
+  const claimLine = el('p', { class: 'declared-claim', text: 'Waiting for the run to start…' });
+  const checklist = el('p', { class: 'declared-note', hidden: true });
+  const layerList = el('ol', { class: 'declared-layers' });
+  const layerGroup = el('div', { class: 'declared-group', hidden: true }, [el('h3', { class: 'label', text: 'Hidden code, decoded' }), layerList]);
+  const declared = el('section', { class: 'declared', 'aria-label': 'What you were told' }, [
+    el('div', { class: 'declared-inner' }, [
+      el('div', { class: 'declared-group' }, [el('h2', { class: 'label', text: 'You were told' }), claimLine, checklist]),
+      layerGroup,
     ]),
-  );
-  const timeline = el('ol', { class: 'timeline', 'aria-live': 'polite', 'aria-relevant': 'additions' });
-  const timelineWrap = el('section', { class: 'timeline-wrap' }, [el('h2', { text: 'What happened, as it happened' }), timeline]);
-  const verdictBox = el('section', { class: 'verdict-live', hidden: true, 'aria-live': 'polite' });
-  const errorBox = el('section', { class: 'error-box', role: 'alert', hidden: true });
-  const reconnect = el('p', { class: 'reconnect', role: 'status', hidden: true }, 'Connection lost. Reconnecting…');
+  ]);
+  const timeline = el('ol', { class: 'feed', 'aria-live': 'polite', 'aria-relevant': 'additions' });
+  const found = el('section', { class: 'found' }, [el('div', { class: 'found-head' }, [el('h2', { class: 'label', text: 'It actually did, as it happened' })]), timeline]);
 
-  root.append(el('div', { class: 'run-head' }, [stepList, status]), reconnect, alertBox, errorBox, verdictBox, timelineWrap);
+  root.append(stepList, status, reconnect, alertBox, errorBox, verdictBox, el('div', { class: 'run-cols' }, [declared, found]));
 
-  function setPhase(id) {
+  function setPhase(id, { back = false } = {}) {
     const i = PHASE_INDEX[id];
-    if (i === undefined || i < phase) return;
+    if (i === undefined || (i < phase && !back)) return;
     phase = i;
     steps.forEach((s, j) => {
       s.classList.toggle('is-done', j < i);
-      s.classList.toggle('is-current', j === i);
+      s.classList.toggle('is-current', j === i && id !== 'done');
+      if (id === 'done' && j === i) s.classList.add('is-done');
       if (j === i) s.setAttribute('aria-current', 'step');
       else s.removeAttribute('aria-current');
     });
   }
 
   function addRow(rel, text, detail, tone = 'neutral', opts2 = {}) {
-    const li = el('li', { class: `tl-item tone-${tone}${opts2.marker ? ' tl-marker' : ''}` }, [
-      el('span', { class: 'tl-time', text: typeof rel === 'number' ? fmtRel(rel) : rel || '' }),
-      el('span', { class: 'tl-dot', 'aria-hidden': 'true' }),
-      el('div', { class: 'tl-body' }, [el('div', { class: 'tl-text', text }), detail ? el('div', { class: 'tl-detail', text: detail }) : null]),
+    const li = el('li', { class: `feed-item tone-${tone}${opts2.marker ? ' is-marker' : ''}` }, [
+      el('span', { class: 'feed-time', text: typeof rel === 'number' ? fmtRel(rel) : rel || '' }),
+      el('div', {}, [el('div', { class: 'feed-text', text }), detail ? el('div', { class: 'feed-detail', text: detail }) : null]),
     ]);
     timeline.append(li);
     return li;
+  }
+
+  function addLayer(title, text) {
+    layerList.append(el('li', { class: 'layer-live' }, [el('span', { class: 'label', text: title }), text ? el('pre', { text }) : null]));
+    layerGroup.hidden = false;
   }
 
   function handle(name, data) {
@@ -443,34 +457,36 @@ export function createRunView(root, opts = {}) {
         setPhase('queued');
         const pos = typeof d.position === 'number' ? d.position : null;
         status.textContent = pos === null ? 'Queued.' : pos === 0 ? 'Starting a fresh sandbox…' : `Queued: ${pos} ${pos === 1 ? 'run' : 'runs'} ahead of you.`;
-        addRow('', pos === 0 ? 'Accepted; a sandbox is being prepared' : `Accepted; waiting behind ${pos} other ${pos === 1 ? 'run' : 'runs'}`, '', 'neutral', { marker: true });
+        addRow('', pos === 0 || pos === null ? 'Accepted; a sandbox is being prepared' : `Accepted; waiting behind ${pos} other ${pos === 1 ? 'run' : 'runs'}`, '', 'neutral', { marker: true });
         break;
       }
       case 'run.started':
         setPhase('unwrap');
         status.textContent = 'Preparing a disposable sandbox with fake credentials and a fake internet.';
-        addRow('', 'Run started: fresh sandbox, new decoy credentials', d.claim ? `You were told: "${str(d.claim, 300)}"` : '', 'neutral', { marker: true });
+        claimLine.textContent = d.claim ? `“${str(d.claim, 300)}”` : 'No claim was recorded.';
+        addRow('', 'Run started: fresh sandbox, new decoy credentials', '', 'neutral', { marker: true });
         break;
       case 'unwrap.layer': {
         setPhase('unwrap');
         const layer = d.layer ?? {};
         if (layer.status === 'gave_up' || layer.status === 'too_large') {
-          addRow('', 'Could not unwrap the inner layers of the command', str(layer.reason, 200), 'warn');
+          addLayer('Could not unwrap the inner layers', str(layer.reason, 200));
         } else {
-          const how = layer.method === 'harness' ? 'by running it with execution disabled' : `(${str(layer.method, 30)})`;
-          addRow('', `Unwrapped hidden layer ${str(layer.index, 4)} ${how}`, str(layer.preview, 240), layer.markers?.exec?.length ? 'warn' : 'neutral');
+          const how = layer.method === 'harness' ? 'run with execution disabled' : str(layer.method, 30);
+          addLayer(`Layer ${str(layer.index, 4)}, ${how}`, str(layer.preview, 1200));
         }
         status.textContent = 'Peeling the encoded layers of the command.';
         break;
       }
       case 'contract.ready': {
         const c = d.contract ?? {};
-        const hosts = Array.isArray(c.expected_hosts) && c.expected_hosts.length ? `Allowed hosts: ${c.expected_hosts.map((h) => str(h, 253)).join(', ')}` : 'No network expected';
-        addRow('', `Claim turned into a checklist: ${str(c.summary, 300) || 'nothing specific expected'}`, hosts, 'neutral');
+        const hosts = Array.isArray(c.expected_hosts) && c.expected_hosts.length ? `Allowed hosts: ${c.expected_hosts.map((h) => str(h, 253)).join(', ')}.` : 'No network expected.';
+        checklist.textContent = `Read as: ${str(c.summary, 300).replace(/[.]+$/, '') || 'nothing specific expected'}. ${hosts}`;
+        checklist.hidden = false;
         break;
       }
       case 'exec.started':
-        setPhase('exec');
+        setPhase('exec', { back: d.attempt === 2 });
         status.textContent = `Running the command inside the sandbox (up to ${str(d.timeout_s, 5) || '60'} s).`;
         addRow(d.attempt === 2 ? '' : 0, d.attempt === 2 ? 'Second run started in a fresh sandbox' : 'Command started in the sandbox', `No internet, no real secrets, ${str(d.timeout_s, 5) || '60'} second limit`, 'neutral', { marker: true });
         break;
@@ -551,10 +567,11 @@ export function createRunView(root, opts = {}) {
           el('h2', { class: 'error-title', text: 'This run could not finish' }),
           el('p', { text: title }),
           text ? el('p', { text }) : null,
-          el('p', { class: 'muted', text: d.retryable ? 'You can try again. No verdict was produced.' : 'No verdict was produced.' }),
+          el('p', { class: 'small', text: d.retryable ? 'You can try again. No verdict was produced.' : 'No verdict was produced.' }),
         );
         errorBox.hidden = false;
         status.textContent = 'Stopped.';
+        steps.forEach((s) => s.classList.remove('is-current'));
         addRow('', `Run stopped: ${title}`, str(d.stage ? `During ${d.stage}` : '', 40), 'bad', { marker: true });
         opts.onError?.(d);
         break;
@@ -567,17 +584,20 @@ export function createRunView(root, opts = {}) {
   function renderVerdict(v, findings) {
     clear(verdictBox);
     const level = str(v.level, 12);
-    verdictBox.className = `verdict-live level-${levelClass(level)}`;
+    verdictBox.className = `verdict-card level-${levelClass(level)}`;
     append(
       verdictBox,
-      el('p', { class: 'verdict-label', text: 'Verdict' }),
-      el('p', { class: 'verdict-word' }, [verdictIcon(level), VERDICT_WORD[level] ?? level]),
-      el('p', { class: 'verdict-sentence', text: verdictSentence(level) }),
-      el('p', { class: 'verdict-headline', text: findings[0]?.title ? str(findings[0].title, 160) : verdictLead(level) }),
+      el('div', { class: 'verdict-card-top' }, [
+        verdictStamp(level),
+        el('div', {}, [
+          el('p', { class: 'verdict-sentence', text: verdictSentence(level) }),
+          el('p', { class: 'verdict-headline', text: findings[0]?.title ? str(findings[0].title, 160) : verdictLead(level) }),
+        ]),
+      ]),
       findings.length
-        ? el('ul', { class: 'verdict-findings' }, findings.slice(0, 5).map((f) => el('li', {}, [el('span', { class: `sev sev-${str(f.severity, 10)}`, text: SEVERITY_LABEL[f.severity] ?? str(f.severity, 10) }), ' ', str(f.title, 200)])))
+        ? el('ul', { class: 'verdict-findings' }, findings.slice(0, 5).map((f) => el('li', {}, [el('span', { class: `sev sev-${str(f.severity, 10)}`, text: SEVERITY_LABEL[f.severity] ?? str(f.severity, 10) }), str(f.title, 200)])))
         : null,
-      el('a', { class: 'btn btn-primary verdict-link', hidden: true, href: '#' }, 'Open the full report'),
+      el('div', {}, [el('a', { class: 'btn btn-primary verdict-link', hidden: true, href: '#' }, 'Open the full report')]),
     );
     verdictBox.hidden = false;
   }

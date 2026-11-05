@@ -14,15 +14,29 @@ const ASSET_TYPES = {
   '.txt': 'text/plain; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  '.woff2': 'font/woff2',
 };
 
 /** Everything the web server can ever hand out. Pages are keyed by URL path, assets by file name. */
 export const PAGES = Object.freeze({ '/': 'index.html', '/robots.txt': 'robots.txt' });
 export const REPORT_PAGE = 'report.html';
 export const ASSETS = Object.freeze(['style.css', 'ui.js', 'sse.js', 'app.js', 'report.js']);
+/** Self-hosted IBM Plex (web/fonts/LICENSE-IBM-Plex.txt), so a page needs no other site. */
+export const FONTS = Object.freeze([
+  'fonts/plex-sans-400.woff2',
+  'fonts/plex-sans-500.woff2',
+  'fonts/plex-sans-600.woff2',
+  'fonts/plex-sans-700.woff2',
+  'fonts/plex-sans-condensed-600.woff2',
+  'fonts/plex-sans-condensed-700.woff2',
+  'fonts/plex-mono-400.woff2',
+  'fonts/plex-mono-500.woff2',
+  'fonts/plex-mono-600.woff2',
+]);
 
 const CACHE_HTML = 'no-cache';
 const CACHE_ASSET = 'public, max-age=3600';
+const CACHE_FONT = 'public, max-age=604800';
 
 /**
  * Read the allowlisted files under `webDir`. Throws if one is missing, so a broken deploy fails
@@ -40,6 +54,7 @@ export async function createStatic(webDir) {
     assets.set(`/static/${name}`, entry);
     versions.set(name, entry.etag.slice(1, 9));
   }
+  for (const name of FONTS) assets.set(`/static/${name}`, await load(webDir, name, ASSET_TYPES['.woff2'], CACHE_FONT));
   const pages = new Map();
   for (const [url, name] of Object.entries(PAGES)) {
     pages.set(url, await load(webDir, name, name.endsWith('.html') ? HTML : ASSET_TYPES['.txt'], CACHE_HTML, versions));

@@ -4,13 +4,14 @@ import { fetchRun, openRunStream } from './sse.js';
 
 const CODE_KEY = 'firstrun.accessCode';
 const RUN_ID_RE = /^[0-9A-Z]{26}$/;
-const LANDING_SECTIONS = ['hero', 'how', 'limits']; // hidden while a run is shown
+const LANDING_SECTIONS = ['hero', 'specimen', 'how', 'limits']; // hidden while a run is shown
 
 const form = $('run-form');
 const commandEl = $('command');
 const claimEl = $('claim');
 const codeEl = $('access-code');
 const codeField = $('code-field');
+const codeNote = $('code-note');
 const submitBtn = $('submit');
 const formError = $('form-error');
 const samplesEl = $('samples');
@@ -74,6 +75,14 @@ async function loadSamples() {
   }
 }
 
+/** The code is only for your own commands: an example, or an instance without free-form, needs none. */
+function syncCodeField() {
+  const noCode = Boolean(selectedSample) || freeformDisabled;
+  codeField.hidden = noCode;
+  codeNote.hidden = !noCode;
+  codeNote.textContent = selectedSample ? 'Examples need no access code.' : 'This instance only runs the examples.';
+}
+
 function selectSample(sample) {
   selectedSample = sample;
   for (const btn of samplesEl.querySelectorAll('.sample')) {
@@ -86,14 +95,13 @@ function selectSample(sample) {
     claimEl.readOnly = true;
     selectedTitle.textContent = String(sample.title ?? sample.id);
     selectedBox.hidden = false;
-    codeField.hidden = true;
   } else {
     commandEl.readOnly = false;
     claimEl.readOnly = false;
     selectedBox.hidden = true;
-    codeField.hidden = freeformDisabled;
     if (!freeformDisabled) commandEl.focus();
   }
+  syncCodeField();
   updateCounter();
   hideFormError();
 }
@@ -184,7 +192,7 @@ form.addEventListener('submit', async (e) => {
       const retry = Number(data?.retry_after_s ?? res.headers.get('retry-after')) || undefined;
       if (code === 'freeform_disabled') {
         freeformDisabled = true;
-        codeField.hidden = true;
+        syncCodeField();
       }
       if (code === 'runs_disabled') showNotice('New runs are paused right now.', 'Try again in a little while.', 'warn');
       return showFormError(code, data?.message, retry);
@@ -200,11 +208,28 @@ form.addEventListener('submit', async (e) => {
 // Live run
 
 function startRun(runId, { reportUrl, after = 0 } = {}) {
+  const linkLead = el('span');
   stream?.close();
   clear(runViewEl);
   const url = typeof reportUrl === 'string' && reportUrl.includes(`/r/${runId}`) ? reportUrl : `/r/${runId}`;
-  const view = createRunView(runViewEl, { reportUrl: url });
-  runIdLine.textContent = `Run ${runId}. Share link: ${url.startsWith('http') ? url : `${location.origin}${url}`}`;
+  const runTitle = $('run-title');
+  runTitle.textContent = 'Checking the command';
+  const view = createRunView(runViewEl, {
+    reportUrl: url,
+    onDone: () => {
+      runTitle.textContent = 'Check finished';
+      linkLead.textContent = 'Report link: ';
+    },
+    onError: () => {
+      runTitle.textContent = 'Check stopped';
+      runIdLine.hidden = true;
+    },
+  });
+  clear(runIdLine);
+  linkLead.textContent = 'Report link, ready when the run finishes: ';
+  const shareLink = url.startsWith('http') ? url : `${location.origin}${url}`;
+  runIdLine.hidden = false;
+  append(runIdLine, linkLead, el('a', { class: 'mono', href: url, text: shareLink }));
   runCard.hidden = false;
   for (const id of LANDING_SECTIONS) $(id).hidden = true;
   history.replaceState(null, '', `/?run=${runId}`);

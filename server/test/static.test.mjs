@@ -5,7 +5,7 @@ import http from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { ASSETS, PAGES, REPORT_PAGE, createStatic } from '../http/static.mjs';
+import { ASSETS, PAGES, REPORT_PAGE, createStatic, FONTS } from '../http/static.mjs';
 
 const RUN_ID = '7K2Q4W5E6R7T8Y9U0I1O2P3A4S';
 
@@ -23,6 +23,8 @@ function writeWeb(dir, { skip = null } = {}) {
     'secret.txt': 'must never be served',
   };
   for (const [name, content] of Object.entries(files)) if (name !== skip) writeFileSync(path.join(dir, name), content);
+  mkdirSync(path.join(dir, 'fonts'), { recursive: true });
+  for (const name of FONTS) writeFileSync(path.join(dir, name), 'font bytes');
   mkdirSync(path.join(dir, 'sub'));
   writeFileSync(path.join(dir, 'sub', 'index.html'), 'nested');
 }
@@ -115,6 +117,10 @@ describe('createStatic', () => {
     assert.equal(css.headers.get('content-type'), 'text/css; charset=utf-8');
     const ui = await get('/static/ui.js');
     assert.equal(await ui.text(), 'export const ui = 1;');
+    const font = await get('/static/fonts/plex-sans-400.woff2');
+    assert.equal(font.status, 200);
+    assert.equal(font.headers.get('content-type'), 'font/woff2');
+    assert.equal((await get('/static/fonts/other.woff2')).status, 404);
   });
 
   test('a changed dependency changes the hash of the module that imports it', async () => {

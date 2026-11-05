@@ -69,7 +69,7 @@ Each report shows what you were told against what happened, every recorded event
   <img src="docs/assets/live-run.gif" width="100%" alt="Screen recording of the public site. The example command is filled in, the run starts, a red banner reports a fake credential leaving the sandbox, the verdict Malicious appears, and the report page scrolls past.">
 </p>
 <p align="center">
-  <sub>Recorded from the public site in real time, nothing sped up. The red banner appears less than a second after the command starts. <a href="https://firstrun.makmurlab.com/r/PFVEKGXD7PK8MX3S1Y59ZMW420">Open the report from this recording</a>.</sub>
+  <sub>Recorded from the public site in real time, nothing sped up. The red banner appears less than a second after the command starts. <a href="https://firstrun.makmurlab.com/r/N9ECY3G7XF9DQF9FD3GPDQEAJ0">Open the report from this recording</a>.</sub>
 </p>
 
 ### What makes it different
@@ -398,7 +398,7 @@ The report schema is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), section 10
 | `sandbox/` | The fake laptop's image, stand-in programs for other systems |
 | `sinkhole/` | The fake internet's image |
 | `infra/` | VM setup, HTTPS, Docker runtimes, services, the trace collector |
-| `web/` | The site: plain HTML, CSS and JavaScript with no build step |
+| `web/` | The site: plain HTML, CSS and JavaScript with no build step, and self-hosted IBM Plex fonts |
 | `fixtures/` | The samples, 71 rule test cases, captured trace logs |
 | `scripts/` | Smoke test, network check, trace self-test, image builds |
 | `docs/` | Full design, runbook, demo script |
@@ -436,6 +436,6 @@ Your command text is kept in the report and is visible to anyone with the link, 
 
 ## 9. License and contact
 
-MIT, see [LICENSE](LICENSE). The nvm installer used by the `nvm` sample is MIT-licensed by its authors; its notice is in [`fixtures/samples/nvm/LICENSE-nvm.md`](fixtures/samples/nvm/LICENSE-nvm.md).
+MIT, see [LICENSE](LICENSE). The nvm installer used by the `nvm` sample is MIT-licensed by its authors; its notice is in [`fixtures/samples/nvm/LICENSE-nvm.md`](fixtures/samples/nvm/LICENSE-nvm.md). The IBM Plex fonts in `web/fonts/` are under the SIL Open Font License; see [`web/fonts/LICENSE-IBM-Plex.txt`](web/fonts/LICENSE-IBM-Plex.txt).
 
 To have a report deleted, open an issue on this repository with the report's run id. Please do not post the command itself.

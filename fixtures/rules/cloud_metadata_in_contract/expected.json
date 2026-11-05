@@ -1,0 +1,14 @@
+{
+  "level": "SUSPICIOUS",
+  "rule_ids": [
+    "net.cloud_metadata"
+  ],
+  "severity_counts": {
+    "high": 2
+  },
+  "findings_count": 2,
+  "rules_absent": [
+    "net.ip_literal",
+    "net.unexpected_host"
+  ]
+}

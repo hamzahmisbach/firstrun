@@ -56,6 +56,51 @@ export const SCHEDULER = Object.freeze([
   '/Library/LaunchDaemons/**',
 ]);
 
+/**
+ * Settings files of coding tools that can run commands on their own: Claude Code hooks
+ * (`SessionStart` in settings.json), Gemini CLI hooks (settings.json), Cursor hooks (hooks.json)
+ * and VS Code tasks with `runOn: folderOpen`. Both the user-level file and any project copy count.
+ */
+export const AGENT_AUTOSTART = Object.freeze([
+  '~/.claude/settings.json',
+  '~/.claude/settings.local.json',
+  '**/.claude/settings.json',
+  '**/.claude/settings.local.json',
+  '~/.gemini/settings.json',
+  '**/.gemini/settings.json',
+  '~/.cursor/hooks.json',
+  '**/.cursor/hooks.json',
+  '**/.vscode/tasks.json',
+]);
+
+/**
+ * Cloud instance metadata service: the link-local IPv4/IPv6 address every provider uses and the
+ * names GCP and Azure publish for it. Reaching it hands out instance credentials, so no claim
+ * explains it.
+ */
+export const CLOUD_METADATA = Object.freeze(['169.254.169.254', 'fd00:ec2::254', 'metadata.google.internal', 'metadata.azure.com']);
+
+/**
+ * System locations a normal user cannot write. An attempt counts whether or not it succeeded:
+ * in the sandbox it fails only because the user is not an administrator (`fs.system_write_attempt`).
+ */
+export const SYSTEM_DIRS = Object.freeze(['/etc/**', '/usr/**', '/lib/**', '/lib64/**', '/bin/**', '/sbin/**', '/boot/**', '/root/**']);
+
+/** System files that control loading, login or privileges: an attempt here is high. */
+export const SYSTEM_CRITICAL = Object.freeze([
+  '/etc/ld.so.preload',
+  '/etc/ld.so.conf*',
+  '/etc/ld.so.conf*/**',
+  '/etc/sudoers*',
+  '/etc/sudoers*/**',
+  '/etc/passwd',
+  '/etc/shadow',
+  '/etc/group',
+  '/etc/pam.d/**',
+  '/etc/ssh/**',
+  '/root/.ssh/**',
+]);
+
 const IPV4_RE = /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/;
 
 /** `~/x` -> `/home/dev/x`; absolute paths unchanged. */
@@ -178,6 +223,16 @@ export function isPrivateIp(ip) {
     return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
   }
   return v.startsWith('fc') || v.startsWith('fd') || v.startsWith('fe80:');
+}
+
+/**
+ * The canonical metadata address or name when `target` (host or IP literal, IPv4-mapped IPv6
+ * included) is the cloud metadata service, else null. Doubles as the finding's group key.
+ */
+export function cloudMetadataTarget(target) {
+  let t = normalizeHost(target);
+  if (t.startsWith('::ffff:')) t = t.slice(7);
+  return CLOUD_METADATA.includes(t) ? t : null;
 }
 
 export function isPtrName(name) {

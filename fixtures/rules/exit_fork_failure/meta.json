@@ -1,0 +1,9 @@
+{
+  "exec": {
+    "exit_code": 2,
+    "timed_out": false,
+    "stdout_bytes": 0,
+    "stderr_bytes": 60,
+    "stderr_preview": "bash: fork: retry: Resource temporarily unavailable\n"
+  }
+}

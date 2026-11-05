@@ -1,0 +1,14 @@
+{
+  "summary": "logs out of the AWS CLI",
+  "expected_hosts": [],
+  "expected_write_paths": [
+    "~/.aws/**"
+  ],
+  "expected_processes": [
+    "aws"
+  ],
+  "allowed_decoy_categories": [
+    "cloud_credentials"
+  ],
+  "notes": ""
+}

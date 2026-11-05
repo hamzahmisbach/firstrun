@@ -13,8 +13,25 @@ export const EVIDENCE_LIMITS = Object.freeze({
     'file.open': 5000,
     'net.connect': 1000,
     'shim.call': 500,
+    // File-change kinds (7.6) are exempt from `total` like canary.hit: a flood of reads must not be
+    // able to push the deletes that follow it out of the report.
+    'file.delete': 3000,
+    'file.rename': 500,
+    'file.chmod': 500,
+    'file.truncate': 300,
+    'file.link': 300,
+    'dir.remove': 1000,
+    'dir.create': 1000,
     sinkhole: 2000, // per sinkhole kind
     total: LIMITS.output.eventsPerRun, // canary.hit and exec.finished are exempt
+  }),
+  fileops: Object.freeze({
+    // runsc boot log: one record is a strace line plus any continuation lines a file name with a
+    // line break produced; lines of other kinds (gVisor's own logging) are skipped unparsed.
+    maxRecordBytes: 64 * KiB,
+    maxContinuationLines: 32, // unprefixed lines kept after a strace line (a name's line breaks)
+    maxLines: 200_000, // strace lines read per run; beyond it coverage.fileops.capped counts
+    maxSplits: 16, // candidate argument splits tried per record when a name contains a separator
   }),
   matcher: Object.freeze({
     bodyMaxBytes: 2 * MiB, // first bytes of bodies/<id>.bin
@@ -46,6 +63,15 @@ const sinkhole = { ...envelope, source: z.literal('sinkhole') };
 const orchestrator = { ...envelope, source: z.literal('orchestrator') };
 
 const port = z.number().int().min(0).max(65535);
+const fileop = {
+  ...gvisor,
+  pid: z.number().int(),
+  ok: z.boolean(),
+  errno: z.number().int().optional(),
+  alt_paths: z.array(z.string().startsWith('/')).optional(),
+  partial: z.literal(true).optional(),
+  cwd_assumed: z.literal(true).optional(),
+};
 
 export const EVENT_SCHEMAS = {
   'proc.exec': z.looseObject({
@@ -68,6 +94,31 @@ export const EVENT_SCHEMAS = {
     ok: z.literal(false).optional(),
     errno: z.number().int().optional(),
   }),
+  // 7.6 file-change events from the runsc strace log. `ok: false` carries errno; `alt_paths` lists
+  // the other readings of a record whose file name contained an argument separator; `partial`
+  // marks a record cut by a line break in a name, whose path is only a prefix of the real one.
+  'file.delete': z.looseObject({ ...fileop, kind: z.literal('file.delete'), path: z.string().startsWith('/'), decoy_id: z.string().optional() }),
+  'file.chmod': z.looseObject({ ...fileop, kind: z.literal('file.chmod'), path: z.string().startsWith('/'), mode: z.number().int().optional(), decoy_id: z.string().optional() }),
+  'file.truncate': z.looseObject({ ...fileop, kind: z.literal('file.truncate'), path: z.string().startsWith('/'), decoy_id: z.string().optional() }),
+  'file.rename': z.looseObject({
+    ...fileop,
+    kind: z.literal('file.rename'),
+    from: z.string().startsWith('/'),
+    to: z.string().startsWith('/').optional(),
+    decoy_id: z.string().optional(),
+    to_decoy_id: z.string().optional(),
+  }),
+  'file.link': z.looseObject({
+    ...fileop,
+    kind: z.literal('file.link'),
+    from: z.string().startsWith('/'),
+    to: z.string().startsWith('/').optional(),
+    link: z.enum(['hard', 'symlink']),
+    decoy_id: z.string().optional(),
+    to_decoy_id: z.string().optional(),
+  }),
+  'dir.remove': z.looseObject({ ...fileop, kind: z.literal('dir.remove'), path: z.string().startsWith('/') }),
+  'dir.create': z.looseObject({ ...fileop, kind: z.literal('dir.create'), path: z.string().startsWith('/'), mode: z.number().int().optional() }),
   'net.connect': z.looseObject({
     ...gvisor,
     kind: z.literal('net.connect'),
@@ -153,6 +204,7 @@ export const EVENT_SCHEMAS = {
 
 export const KINDS = Object.freeze(Object.keys(EVENT_SCHEMAS));
 export const SINKHOLE_KINDS = Object.freeze(['dns.query', 'http.request', 'tls.clienthello', 'tls.failed', 'tcp.connect', 'udp.datagram']);
+export const FILEOP_KINDS = Object.freeze(['file.delete', 'file.rename', 'file.chmod', 'file.truncate', 'file.link', 'dir.remove', 'dir.create']);
 
 export const EventSchema = z.discriminatedUnion('kind', Object.values(EVENT_SCHEMAS));
 

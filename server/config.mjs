@@ -102,6 +102,19 @@ export const LIMITS = deepFreeze({
   },
   llm: {
     contractWaitMs: 20 * SECOND, // how long step 11 waits for claim-to-contract before the fallback (8.1)
+    reviewWaitMs: 20 * SECOND, // how long step 11 waits for the AI code review before the rules verdict stands alone (8.7)
+    // What the AI reviewer is shown (8.7): the pasted command, decoded layers and an allowlisted
+    // summary of what was recorded, each cut to these sizes (the prompt says what was cut).
+    review: {
+      commandMaxChars: 8000,
+      layersMax: 5,
+      layerMaxChars: 4000,
+      programsMax: 40,
+      programMaxChars: 160,
+      writesMax: 30,
+      hostsMax: 20,
+      credentialReadsMax: 10,
+    },
   },
   unwrap: {
     maxLayers: 5,
@@ -128,8 +141,9 @@ export const LIMITS = deepFreeze({
   },
   janitor: {
     sweepEveryMs: MINUTE,
-    orphanAgeMs: 10 * MINUTE, // containers, networks, trace files and run dirs left behind by a crash
+    orphanAgeMs: 10 * MINUTE, // containers, networks, trace files, runsc logs and run dirs left behind by a crash
     failedRunKeepMs: DAY, // sinkhole/ of a failed run is kept (0700) this long for debugging
+    unknownLogMaxBytes: 4 * MiB, // runsc appends to <unknown>.<command>.log on every container delete
   },
   health: {
     dockerCacheMs: 30 * SECOND,
@@ -175,6 +189,9 @@ const EnvSchema = z
     FIRSTRUN_KILL_SWITCH_FILE: filePath('/srv/firstrun/KILL_SWITCH'),
     FIRSTRUN_RUNS_DIR: filePath('/srv/firstrun/runs'),
     FIRSTRUN_TRACE_DIR: filePath('/srv/firstrun/trace'),
+    // runsc --debug-log directory (infra/docker/daemon.json): <cid>.boot.log carries the strace
+    // lines for file deletes, renames, chmods and links (docs/ARCHITECTURE.md 7.6).
+    FIRSTRUN_RUNSC_LOG_DIR: filePath('/var/log/firstrun/runsc'),
     FIRSTRUN_SPOOL_DIR: filePath('/srv/firstrun/spool'),
     FIRSTRUN_SINK_SOCKET: filePath('/run/firstrun/gvisor-sink.sock'),
     FIRSTRUN_SAMPLES_DIR: filePath(DEFAULT_SAMPLES_DIR),
@@ -233,6 +250,7 @@ export function loadConfig(env = process.env) {
     killSwitchFile: e.FIRSTRUN_KILL_SWITCH_FILE,
     runsDir: e.FIRSTRUN_RUNS_DIR,
     traceDir: e.FIRSTRUN_TRACE_DIR,
+    runscLogDir: e.FIRSTRUN_RUNSC_LOG_DIR,
     spoolDir: e.FIRSTRUN_SPOOL_DIR,
     sinkSocket: e.FIRSTRUN_SINK_SOCKET,
     samplesDir: e.FIRSTRUN_SAMPLES_DIR,

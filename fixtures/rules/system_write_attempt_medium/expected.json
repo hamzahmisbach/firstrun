@@ -1,0 +1,13 @@
+{
+  "level": "SUSPICIOUS",
+  "rule_ids": [
+    "fs.system_write_attempt"
+  ],
+  "severity_counts": {
+    "medium": 2,
+    "high": 1
+  },
+  "rules_absent": [
+    "fs.unexpected_write"
+  ]
+}

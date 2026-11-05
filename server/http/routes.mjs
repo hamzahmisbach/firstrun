@@ -11,6 +11,7 @@ import { RUN_ID_RE, newRunId } from '../run/ids.mjs';
 import { RunError } from '../run/lifecycle.mjs';
 import { RunQueue } from '../run/queue.mjs';
 import { RunRegistry } from '../run/registry.mjs';
+import { detectPlatform, platformMessage } from './platform.mjs';
 import { RateLimiter } from './ratelimit.mjs';
 import { HttpError, createRouter, sendJson } from './router.mjs';
 import { SseHubs } from './sse.mjs';
@@ -432,6 +433,13 @@ export async function createApp(config, opts = {}) {
         throw new HttpError(403, 'access_code_invalid', 'The access code is not valid.');
       }
       input = parseFreeformRequest(ctx.body);
+      // Linux only (platform.mjs): refused before anything is queued, so no sandbox and no run quota
+      // (the token taken above is given back; the wrong-code paths keep theirs).
+      const other = detectPlatform(input.command);
+      if (other) {
+        limiter.refund('postRun', ip);
+        throw new HttpError(422, 'unsupported_platform', platformMessage(other), { fields: { platform: other.platform } });
+      }
     }
 
     if (queue.isFull()) {

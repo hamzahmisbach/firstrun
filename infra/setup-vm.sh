@@ -53,8 +53,8 @@ fi
 RUNSC="$(command -v runsc)"
 runsc --version | head -n1
 
-log "Docker runtimes: runsc (trace), runsc-strace (fallback), runsc-plain (netcheck)"
-install -d -m 0755 /etc/firstrun /var/log/firstrun /var/log/firstrun/runsc
+log "Docker runtimes: runsc (trace points + strace of file-changing syscalls), runsc-plain (netcheck)"
+install -d -m 0755 /etc/firstrun /var/log/firstrun
 install -m 0644 "$REPO_DIR/infra/gvisor-sink/trace-session.json" /etc/firstrun/trace-session.json
 sed "s#/usr/bin/runsc#${RUNSC}#g" "$REPO_DIR/infra/docker/daemon.json" > /etc/docker/daemon.json.firstrun
 if ! cmp -s /etc/docker/daemon.json.firstrun /etc/docker/daemon.json 2>/dev/null; then
@@ -69,6 +69,9 @@ docker info --format '{{range $name, $_ := .Runtimes}}{{$name}} {{end}}'
 log "service user and directories"
 id -u firstrun >/dev/null 2>&1 || useradd --system --home-dir /srv/firstrun --shell /usr/sbin/nologin firstrun
 install -d -m 0750 -o firstrun -g firstrun /srv/firstrun /srv/firstrun/runs /srv/firstrun/trace /srv/firstrun/spool
+# runsc (root) writes <cid>.boot.log here (0644); the service tails it for file changes (7.6) and
+# deletes it at teardown, so the directory belongs to the service user.
+install -d -m 0750 -o firstrun -g firstrun /var/log/firstrun/runsc
 if [[ ! -f /etc/firstrun/firstrun.env ]]; then
   install -m 0640 -o root -g firstrun "$REPO_DIR/.env.example" /etc/firstrun/firstrun.env
   echo "created /etc/firstrun/firstrun.env from .env.example: fill in the keys"

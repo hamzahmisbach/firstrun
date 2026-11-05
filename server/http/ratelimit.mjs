@@ -90,6 +90,17 @@ export class RateLimiter {
     return { ok: true };
   }
 
+  /** Give back the token `take(policy, ip)` just consumed, for a request that did no work at all. */
+  refund(policy, ip) {
+    const rules = this.#rules[policy];
+    if (!Array.isArray(rules)) throw new Error(`unknown rate-limit policy ${policy}`);
+    const buckets = this.#entries.get(rateKey(ip))?.buckets[policy];
+    if (!buckets) return;
+    buckets.forEach((b, i) => {
+      b.tokens = Math.min(rules[i].capacity, b.tokens + 1);
+    });
+  }
+
   /** Seconds left on a wrong-access-code block, 0 when not blocked. */
   blockedFor(ip) {
     const entry = this.#entries.get(rateKey(ip));

@@ -117,6 +117,27 @@ export const whereLabel = (w) => WHERE_LABEL[w] ?? (w ? str(w, 40) : 'outgoing t
  * @param {Map<string, object>} [decoys] decoy_id -> manifest entry, when known
  * @returns {{text: string, detail: string, tone: 'neutral'|'info'|'warn'|'bad', kind: string}}
  */
+/** Shared ending for file changes: a touched fake credential stands out, and failures say so. */
+function fileChangeDetail(out, ev, decoys) {
+  if (ev.decoy_id) {
+    const d = decoys.get(ev.decoy_id);
+    out.detail = d?.category ? `Decoy ${categoryLabel(d.category)}, created for this run` : 'Decoy file, created for this run';
+    out.tone = 'bad';
+  }
+  if (ev.ok === false) out.detail = [out.detail, `Failed${ev.errno ? ` (${str(ev.errno, 20)})` : ''}`].filter(Boolean).join('. ');
+}
+
+/** Second-try settings in plain words. The report and SSE only ever carry names, never values. */
+export function describeSettings(settings) {
+  const s = settings && typeof settings === 'object' ? settings : {};
+  const parts = [];
+  if (Array.isArray(s.set_env) && s.set_env.length) parts.push(`provided ${s.set_env.map((n) => str(n, 40)).join(', ')}`);
+  if (s.hostname && s.hostname !== 'devbox') parts.push(`named the machine ${str(s.hostname, 40)}`);
+  if (s.answer_yes) parts.push('answered yes to questions');
+  if (s.skip_sleep) parts.push('skipped waiting');
+  return parts.join(', ');
+}
+
 export function describeEvent(ev, bySeq = new Map(), decoys = new Map()) {
   const kind = str(ev?.kind, 40);
   const out = { text: '', detail: '', tone: 'neutral', kind };
@@ -142,6 +163,28 @@ export function describeEvent(ev, bySeq = new Map(), decoys = new Map()) {
         out.text = `${verb} ${p}`;
         if (ev.ok === false) out.detail = `Failed${ev.errno ? ` (${str(ev.errno, 20)})` : ''}`;
       }
+      break;
+    }
+    case 'file.delete':
+    case 'file.truncate':
+    case 'file.chmod':
+    case 'dir.remove':
+    case 'dir.create': {
+      const p = homePath(ev.path) || '(unknown path)';
+      const verb = { 'file.delete': 'Deleted', 'file.truncate': 'Emptied', 'file.chmod': 'Changed the permissions of', 'dir.remove': 'Removed the folder', 'dir.create': 'Created the folder' }[kind];
+      out.text = `${verb} ${p}`;
+      fileChangeDetail(out, ev, decoys);
+      break;
+    }
+    case 'file.rename': {
+      out.text = `Moved ${homePath(ev.from) || '(unknown path)'}${ev.to ? ` to ${homePath(ev.to)}` : ''}`;
+      fileChangeDetail(out, ev, decoys);
+      break;
+    }
+    case 'file.link': {
+      out.text = `Made a ${ev.link === 'symlink' ? 'shortcut' : 'second name'} for ${homePath(ev.from) || '(unknown path)'}`;
+      out.detail = ev.to ? `At ${homePath(ev.to)}` : '';
+      fileChangeDetail(out, ev, decoys);
       break;
     }
     case 'net.connect': {
@@ -274,6 +317,12 @@ export function verdictLead(level) {
 
 export const levelClass = (level) => (level === 'MALICIOUS' ? 'bad' : level === 'SUSPICIOUS' ? 'warn' : level === 'CLEAN' ? 'ok' : 'none');
 
+/** Decorative glyph next to the verdict word (text, so it needs no SVG and inherits the colour). */
+export function verdictIcon(level) {
+  const glyph = level === 'MALICIOUS' ? '✕' : level === 'SUSPICIOUS' ? '!' : level === 'CLEAN' ? '✓' : '?';
+  return el('span', { class: 'verdict-icon', 'aria-hidden': 'true', 'data-glyph': glyph });
+}
+
 export const SEVERITY_LABEL = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low', info: 'Note' };
 
 // ---------------------------------------------------------------------------------------------
@@ -285,6 +334,7 @@ const ERRORS = {
   access_code_required: 'Running your own command needs an access code. Enter it below, or pick a sample.',
   access_code_invalid: 'That access code is not valid.',
   freeform_disabled: 'This instance only runs the curated samples. Pasting your own command is turned off.',
+  unsupported_platform: 'FirstRun only runs Linux commands.',
   body_too_large: 'That command is too long for this service.',
   unsupported_media_type: 'The request was not understood.',
   rate_limited: 'Too many requests from your address.',
@@ -311,7 +361,7 @@ export function errorText(code, message, retryAfterS) {
   const title = known ? ERRORS[code] : 'The request failed.';
   const parts = [];
   if (!known && message) parts.push(str(message, 300));
-  if (known && code === 'invalid_input' && message) parts.push(str(message, 300));
+  if (known && (code === 'invalid_input' || code === 'unsupported_platform') && message) parts.push(str(message, 300));
   if (typeof retryAfterS === 'number' && retryAfterS > 0) {
     parts.push(retryAfterS < 90 ? `Try again in about ${Math.ceil(retryAfterS)} seconds.` : `Try again in about ${Math.ceil(retryAfterS / 60)} minutes.`);
   }
@@ -323,9 +373,9 @@ export function errorText(code, message, retryAfterS) {
 
 const PHASES = [
   ['queued', 'Queued'],
-  ['unwrap', 'Unwrapping'],
-  ['exec', 'Running'],
-  ['rules', 'Deciding'],
+  ['unwrap', 'Unwrap'],
+  ['exec', 'Run'],
+  ['rules', 'Decide'],
   ['done', 'Report'],
 ];
 const PHASE_INDEX = Object.fromEntries(PHASES.map(([id], i) => [id, i]));
@@ -341,7 +391,7 @@ export function createRunView(root, opts = {}) {
   let phase = -1;
   let verdictLevel = null;
 
-  const steps = PHASES.map(([id, label]) => el('li', { class: 'step', 'data-phase': id }, [el('span', { class: 'step-dot' }), el('span', { text: label })]));
+  const steps = PHASES.map(([id, label]) => el('li', { class: 'step', 'data-phase': id }, [el('span', { class: 'step-bar', 'aria-hidden': 'true' }), el('span', { class: 'step-label', text: label })]));
   const stepList = el('ol', { class: 'steps', 'aria-label': 'Progress' }, steps);
   const status = el('p', { class: 'run-status', role: 'status' }, 'Waiting for the queue…');
   const alertBox = el('section', { class: 'alert-banner', role: 'alert', hidden: true });
@@ -350,13 +400,14 @@ export function createRunView(root, opts = {}) {
   alertBox.append(
     el('div', { class: 'alert-mark', 'aria-hidden': 'true' }, '!'),
     el('div', { class: 'alert-body' }, [
+      el('p', { class: 'alert-kicker', text: 'Caught in the sandbox' }),
       alertTitle,
       alertList,
-      el('p', { class: 'alert-note' }, 'Every credential in this sandbox was created for this run. The request was recorded by the fake network and never reached the internet.'),
+      el('p', { class: 'alert-note' }, 'Every credential in this sandbox was created for this run. The request was recorded by the fake network and never reached the internet. On your machine, this would have been your real key.'),
     ]),
   );
   const timeline = el('ol', { class: 'timeline', 'aria-live': 'polite', 'aria-relevant': 'additions' });
-  const timelineWrap = el('section', { class: 'timeline-wrap' }, [el('h2', { class: 'section-title', text: 'What happened, as it happened' }), timeline]);
+  const timelineWrap = el('section', { class: 'timeline-wrap' }, [el('h2', { text: 'What happened, as it happened' }), timeline]);
   const verdictBox = el('section', { class: 'verdict-live', hidden: true, 'aria-live': 'polite' });
   const errorBox = el('section', { class: 'error-box', role: 'alert', hidden: true });
   const reconnect = el('p', { class: 'reconnect', role: 'status', hidden: true }, 'Connection lost. Reconnecting…');
@@ -421,8 +472,14 @@ export function createRunView(root, opts = {}) {
       case 'exec.started':
         setPhase('exec');
         status.textContent = `Running the command inside the sandbox (up to ${str(d.timeout_s, 5) || '60'} s).`;
-        addRow(0, 'Command started in the sandbox', 'No internet, no real secrets, 60 second limit', 'neutral', { marker: true });
+        addRow(d.attempt === 2 ? '' : 0, d.attempt === 2 ? 'Second run started in a fresh sandbox' : 'Command started in the sandbox', `No internet, no real secrets, ${str(d.timeout_s, 5) || '60'} second limit`, 'neutral', { marker: true });
         break;
+      case 'retry.started': {
+        const changed = describeSettings(d.settings);
+        status.textContent = 'Running it again under changed conditions, to see what it was waiting for.';
+        addRow('', 'The code looks like it waits for something, so FirstRun runs it again', [str(d.why, 200), changed ? `This time: ${changed}` : ''].filter(Boolean).join(' '), 'info', { marker: true });
+        break;
+      }
       case 'evidence': {
         const ev = d.event ?? {};
         if (typeof ev.seq === 'number') bySeq.set(ev.seq, ev);
@@ -440,6 +497,11 @@ export function createRunView(root, opts = {}) {
         alertTitle.textContent = alerts.length === 1 ? 'Fake credential caught leaving the sandbox' : `${alerts.length} fake credentials caught leaving the sandbox`;
         alertList.append(el('li', { text: desc.text }));
         alertBox.hidden = false;
+        if (alerts.length === 1) {
+          // The containment moment: bring it into view once, then leave the scroll position alone.
+          const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+          alertBox.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
+        }
         addRow(ev.t_rel_ms, desc.text, desc.detail, 'bad');
         break;
       }
@@ -509,7 +571,7 @@ export function createRunView(root, opts = {}) {
     append(
       verdictBox,
       el('p', { class: 'verdict-label', text: 'Verdict' }),
-      el('p', { class: 'verdict-word', text: VERDICT_WORD[level] ?? level }),
+      el('p', { class: 'verdict-word' }, [verdictIcon(level), VERDICT_WORD[level] ?? level]),
       el('p', { class: 'verdict-sentence', text: verdictSentence(level) }),
       el('p', { class: 'verdict-headline', text: findings[0]?.title ? str(findings[0].title, 160) : verdictLead(level) }),
       findings.length

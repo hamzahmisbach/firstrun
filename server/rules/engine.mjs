@@ -4,14 +4,20 @@
 // events are expected; unwrap events never reach this module.
 import { z } from 'zod';
 import {
+  AGENT_AUTOSTART,
   BASELINE_WRITE_OK,
+  HOME,
   SCHEDULER,
   SHELL_STARTUP,
+  SYSTEM_CRITICAL,
+  SYSTEM_DIRS,
   basename,
   canonicalHomePath,
   decoyDirs,
+  dirname,
   displayPath,
   expandHome,
+  cloudMetadataTarget,
   hostMatches,
   isLoopback,
   isPrivateIp,
@@ -66,6 +72,7 @@ export const RULE_IDS = Object.freeze([
   'shim.opener',
   'net.unexpected_upload',
   'net.unexpected_host',
+  'net.cloud_metadata',
   'net.ip_literal',
   'net.raw_socket',
   'net.dns_only',
@@ -77,7 +84,10 @@ export const RULE_IDS = Object.freeze([
   'proc.decode_helper',
   'fs.shell_startup_write',
   'fs.scheduler_write',
+  'fs.agent_hook_write',
+  'fs.system_write_attempt',
   'fs.unexpected_write',
+  'fs.existing_file_changed',
   'unwrap.hidden_code',
   'run.timeout',
   'run.oom',
@@ -85,7 +95,9 @@ export const RULE_IDS = Object.freeze([
 ]);
 
 export const MAX_FINDINGS = 200;
-export const MAX_SEQS_PER_FINDING = 50;
+// 100, not 50: `fs.existing_file_changed` is one finding per run and a wiped home holds about 60
+// seeded files, each with its own delete event.
+export const MAX_SEQS_PER_FINDING = 100;
 const ARGS_PREVIEW_CHARS = 80;
 
 export const FindingSchema = z.strictObject({
@@ -113,6 +125,7 @@ export const NOTE_DOWNLOAD =
 
 const SEV_RANK = Object.fromEntries(SEVERITIES.map((s, i) => [s, i]));
 const UPLOAD_METHODS = new Set(['POST', 'PUT', 'PATCH']);
+const CLOUD_METADATA_TITLE = 'Tried to reach the cloud metadata service, which can hand out cloud credentials';
 
 // --- small helpers ---------------------------------------------------------------------------
 
@@ -149,6 +162,56 @@ function isWrite(ev) {
 function writeVerb(ev) {
   return ev.ok === false ? 'Tried to write to' : 'Wrote to';
 }
+
+function files(n) {
+  return `${n} file${n === 1 ? '' : 's'}`;
+}
+
+/** `fs.unexpected_write` title: successes and failed attempts are counted apart, never "Wrote" for a failure. */
+function unexpectedWriteTitle(ok, failed, group) {
+  if (ok > 0 && failed > 0) return `Wrote ${files(ok)} and tried to write ${failed} more under ${group} not covered by the claim`;
+  if (failed > 0) return `Tried to write ${files(failed)} under ${group} not covered by the claim (the writes failed)`;
+  return `Wrote ${files(ok)} under ${group} not covered by the claim`;
+}
+
+/**
+ * `fs.existing_file_changed` title from the per-category path sets: "Deleted 12, moved 2 and
+ * changed 3 files that were already on this computer". The file count is the union.
+ */
+function existingChangedTitle(extra) {
+  const parts = [];
+  for (const [key, word] of [
+    ['deleted', 'deleted'],
+    ['moved', 'moved'],
+    ['changed', 'changed'],
+    ['linked', 'linked'],
+  ]) {
+    const n = extra[key]?.size ?? 0;
+    if (n > 0) parts.push(`${word} ${n}`);
+  }
+  const union = new Set();
+  for (const key of ['deleted', 'moved', 'changed', 'linked']) for (const p of extra[key] ?? []) union.add(p);
+  const list = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}` : parts[0] ?? 'changed 0';
+  const text = `${list} ${union.size === 1 ? 'file that was' : 'files that were'} already on this computer`;
+  return text[0].toUpperCase() + text.slice(1);
+}
+
+/** decoy.write titles for file changes: [done, attempted], `{}` is the shown path. */
+const FILEOP_VERBS = Object.freeze({
+  'file.delete': ['Deleted {}', 'Tried to delete {}'],
+  'file.rename': ['Moved {} away', 'Tried to move {} away'],
+  'file.chmod': ['Changed permissions of {}', 'Tried to change permissions of {}'],
+  'file.truncate': ['Emptied {}', 'Tried to empty {}'],
+  'file.link': ['Made a link to {}', 'Tried to make a link to {}'],
+});
+
+function dirEnumTitle(dirs) {
+  const names = [...dirs].sort();
+  if (names.length === 1) return `Looked through 1 folder that holds credentials (${names[0]})`;
+  return `Looked through ${names.length} folders that hold credentials`;
+}
+
+const FORK_FAILURE_RE = /fork: retry|fork failed|Resource temporarily unavailable|EAGAIN/i;
 
 function isOutboundHit(where) {
   const w = str(where);
@@ -243,18 +306,23 @@ class Findings {
     this.scrub = scrub;
   }
 
-  /** One finding per rule_id + group key; later events only add seqs. */
-  add(ruleId, key, { severity, classification, title, seqs }) {
+  /**
+   * One finding per rule_id + group key; later events only add seqs. `attempt` marks a title that
+   * says "Tried to": a later successful event of the same group replaces it (mv across devices
+   * fails its rename, then copies and deletes; the finding must say "Deleted").
+   */
+  add(ruleId, key, { severity, classification, title, seqs, attempt = false }) {
     const k = `${ruleId}\u0000${key}`;
     let f = this.map.get(k);
     if (!f) {
-      f = { rule_id: ruleId, severity, classification, title: this.scrub(title), seqs: new Set(), extra: {} };
+      f = { rule_id: ruleId, severity, classification, title: this.scrub(title), seqs: new Set(), extra: {}, attempt };
       this.map.set(k, f);
-    } else if (SEV_RANK[severity] > SEV_RANK[f.severity]) {
+    } else if (SEV_RANK[severity] > SEV_RANK[f.severity] || (f.attempt && !attempt && SEV_RANK[severity] === SEV_RANK[f.severity])) {
       // Keep the group at its worst severity (e.g. one explained and one forbidden open).
       f.severity = severity;
       f.classification = classification;
       f.title = this.scrub(title);
+      f.attempt = attempt;
     }
     for (const s of seqs) if (Number.isInteger(s)) f.seqs.add(s);
     return f;
@@ -280,6 +348,8 @@ class Findings {
  * @param {object[]} args.events normalized 7.4 events (any order; sorted by seq here)
  * @param {object} args.contract 8.1 contract (fallback contract when the LLM failed)
  * @param {object[]} args.decoys 5.3 manifest
+ * @param {string[]} [args.seededPaths] every file writeSeed placed in the fake HOME (5.3), as
+ *   `/home/dev/...`: the files that "were already on this computer" for fs.existing_file_changed
  * @param {object[]} [args.layers] 8.2 layers (index >= 1)
  * @param {object} [args.coverage] exec.finished coverage plus run notes (10.3 `coverage`)
  * @param {object} [args.exec] `{exit_code, timed_out}` when not present as an exec.finished event
@@ -289,7 +359,7 @@ class Findings {
  * @param {object} [args.unwrap] `{stopped, harness: {stoppedReason}}` from the decoder/harness loop
  * @returns {{findings: object[], verdict: object, classifications: Record<string, string>}}
  */
-export function evaluate({ events, contract, decoys, layers, coverage, exec, sinkIp, sink_ip, contractMeta, unwrap }) {
+export function evaluate({ events, contract, decoys, seededPaths, layers, coverage, exec, sinkIp, sink_ip, contractMeta, unwrap }) {
   const evs = (Array.isArray(events) ? events : [])
     .filter((e) => e && typeof e === 'object' && Number.isInteger(e.seq))
     .slice()
@@ -307,6 +377,38 @@ export function evaluate({ events, contract, decoys, layers, coverage, exec, sin
 
   const classify = (ev, cls) => {
     classifications[String(ev.seq)] = cls;
+  };
+
+  // 7.6 / 9.2 fs.existing_file_changed: the files that were on the fake machine before the command
+  // ran, and the folders holding them (a link to such a folder, or a record cut by a line break
+  // that still names the folder, counts as touching what was there).
+  const seeded = new Set((Array.isArray(seededPaths) ? seededPaths : []).filter((p) => typeof p === 'string').map(canonicalHomePath));
+  const seededDirs = new Set();
+  for (const p of seeded) {
+    for (let d = dirname(p); d.startsWith(HOME) && !seededDirs.has(d); d = dirname(d)) {
+      seededDirs.add(d);
+      if (d === HOME) break;
+    }
+  }
+  const removedSeeded = new Set(); // deleted or moved away this run: a later op there is on the run's own file
+  const seededTarget = (ev, paths) => {
+    for (const p of paths) {
+      if (typeof p !== 'string' || p === '') continue;
+      const abs = canonicalHomePath(p);
+      if (removedSeeded.has(abs)) continue;
+      if (seeded.has(abs)) return abs;
+      if (ev.partial === true && (seededDirs.has(abs) || seededDirs.has(dirname(abs)))) return abs;
+      // Moving or linking a whole folder that held existing files counts like the files themselves.
+      if ((ev.kind === 'file.link' || ev.kind === 'file.rename') && abs !== HOME && seededDirs.has(abs)) return abs;
+    }
+    return null;
+  };
+  const addExisting = (ev, category, abs) => {
+    classify(ev, 'unexplained');
+    const f = findings.add('fs.existing_file_changed', 'all', { severity: 'medium', classification: 'unexplained', title: '', seqs: [ev.seq] });
+    f.extra[category] = f.extra[category] ?? new Set();
+    f.extra[category].add(displayPath(abs));
+    f.title = existingChangedTitle(f.extra);
   };
 
   const writtenPaths = new Set(); // absolute paths written so far (seq order)
@@ -378,6 +480,7 @@ export function evaluate({ events, contract, decoys, layers, coverage, exec, sin
               classification: explained ? 'explained' : 'forbidden',
               title: `${ev.ok === false ? 'Tried to open' : 'Opened'} ${shown} for writing (fake ${categoryLabel(category)})`,
               seqs: [ev.seq],
+              attempt: ev.ok === false,
             });
             if (!explained && isSensitive(category)) sensitiveOpens.push({ seq: ev.seq });
           } else if (category === 'history') {
@@ -431,8 +534,30 @@ export function evaluate({ events, contract, decoys, layers, coverage, exec, sin
               title: `${writeVerb(ev)} autostart/scheduler location ${shown}`,
               seqs: [ev.seq],
             });
+          } else if (matchesAnyGlob(AGENT_AUTOSTART, path)) {
+            classify(ev, inContract ? 'explained' : 'unexplained');
+            findings.add('fs.agent_hook_write', path, {
+              severity: inContract ? 'low' : 'high',
+              classification: inContract ? 'explained' : 'unexplained',
+              title: `${ev.ok === false ? 'Tried to change' : 'Changed'} a coding tool's settings file ${shown}, which can make it run commands automatically`,
+              seqs: [ev.seq],
+            });
+          } else if (matchesAnyGlob(SYSTEM_DIRS, path)) {
+            // Judged by the file touched, success or not: here it fails only because the sandbox
+            // user is not an administrator; with sudo on a real machine it would succeed.
+            const critical = matchesAnyGlob(SYSTEM_CRITICAL, path);
+            classify(ev, inContract ? 'explained' : 'unexplained');
+            findings.add('fs.system_write_attempt', path, {
+              severity: inContract ? 'low' : critical ? 'high' : 'medium',
+              classification: inContract ? 'explained' : 'unexplained',
+              title: `${writeVerb(ev)} ${shown}, a system file`,
+              seqs: [ev.seq],
+            });
           } else if (inContract) {
             classify(ev, 'explained');
+          } else if (ev.ok !== false && seededTarget(ev, [path])) {
+            // A write open of a file that was already there is the change, however small the edit.
+            addExisting(ev, 'changed', canonicalHomePath(path));
           } else {
             classify(ev, 'unexplained');
             const group = writeGroup(path);
@@ -442,9 +567,10 @@ export function evaluate({ events, contract, decoys, layers, coverage, exec, sin
               title: '',
               seqs: [ev.seq],
             });
-            f.extra.paths = f.extra.paths ?? new Set();
-            f.extra.paths.add(path);
-            f.title = `Wrote ${f.extra.paths.size} file${f.extra.paths.size === 1 ? '' : 's'} under ${group} not covered by the claim`;
+            f.extra.ok = f.extra.ok ?? new Set();
+            f.extra.failed = f.extra.failed ?? new Set();
+            (ev.ok === false ? f.extra.failed : f.extra.ok).add(path);
+            f.title = unexpectedWriteTitle(f.extra.ok.size, f.extra.failed.size, group);
           }
           break;
         }
@@ -454,20 +580,88 @@ export function evaluate({ events, contract, decoys, layers, coverage, exec, sin
           const cats = [...dirs.get(dir)];
           const explained = cats.some((cat) => !NEVER_ALLOWED.has(cat) && (c.catOk(cat) || c.ownerOk(cat)));
           classify(ev, explained ? 'explained' : 'unexplained');
-          findings.add('decoy.dir_enum', dir, {
+          // One finding per run (a `find /` touches every credential folder); worst severity wins.
+          const f = findings.add('decoy.dir_enum', 'all', {
             severity: explained ? 'info' : 'low',
             classification: explained ? 'explained' : 'unexplained',
-            title: `Opened credential directory ${displayPath(canonicalHomePath(dir))}`,
+            title: '',
             seqs: [ev.seq],
           });
+          f.extra.dirs = f.extra.dirs ?? new Set();
+          f.extra.dirs.add(displayPath(canonicalHomePath(dir)));
+          f.title = dirEnumTitle(f.extra.dirs);
         }
+        break;
+      }
+
+      case 'file.delete':
+      case 'file.rename':
+      case 'file.chmod':
+      case 'file.truncate':
+      case 'file.link':
+      case 'dir.remove':
+      case 'dir.create': {
+        activity = true;
+        const primary = str(ev.path) || str(ev.from);
+        const alts = Array.isArray(ev.alt_paths) ? ev.alt_paths.map(str) : [];
+        const decoyExplainedPath = (decoy, category, p) => !NEVER_ALLOWED.has(category) && (c.catOk(category) || c.ownerOk(category) || c.writeOk(p));
+        // decoy.write extended: deleting, moving, emptying, re-permissioning or linking a decoy file.
+        const decoyId = str(ev.decoy_id) || (ev.kind === 'file.rename' ? str(ev.to_decoy_id) : '');
+        if (decoyId && FILEOP_VERBS[ev.kind]) {
+          const decoy = byId.get(decoyId);
+          const category = str(decoy?.category) || 'unknown';
+          const onTo = !str(ev.decoy_id);
+          const target = onTo ? str(ev.to) : primary;
+          const shown = displayPath(canonicalHomePath(target)) || decoyId;
+          const explained = decoyExplainedPath(decoy, category, target);
+          const [did, tried] = FILEOP_VERBS[ev.kind];
+          const phrase = onTo ? `${ev.ok === false ? 'Tried to replace' : 'Replaced'} {} with another file` : ev.ok === false ? tried : did;
+          classify(ev, explained ? 'explained' : 'forbidden');
+          findings.add('decoy.write', decoyId, {
+            severity: explained ? 'low' : 'high',
+            classification: explained ? 'explained' : 'forbidden',
+            title: `${phrase.replace('{}', shown)} (fake ${categoryLabel(category)})`,
+            seqs: [ev.seq],
+            attempt: ev.ok === false,
+          });
+          if (ev.ok !== false && !onTo && (ev.kind === 'file.delete' || ev.kind === 'file.rename')) removedSeeded.add(canonicalHomePath(primary));
+          break;
+        }
+        if (ev.ok === false || ev.kind === 'dir.create' || ev.kind === 'dir.remove') {
+          classify(ev, 'baseline'); // nothing changed, or only a folder (its files are counted one by one)
+          break;
+        }
+        const candidates = ev.kind === 'file.rename' ? [primary, ...alts, str(ev.to)] : [primary, ...alts];
+        const hit = seededTarget(ev, candidates);
+        if (!hit) {
+          classify(ev, c.writeOk(primary) ? 'explained' : 'baseline'); // the run's own files, or /tmp
+          break;
+        }
+        if (matchesAnyGlob(BASELINE_WRITE_OK, hit)) {
+          classify(ev, 'baseline');
+          break;
+        }
+        if (c.writeOk(hit)) {
+          classify(ev, 'explained');
+          break;
+        }
+        let category = 'changed';
+        if (ev.kind === 'file.delete') category = 'deleted';
+        else if (ev.kind === 'file.link') category = 'linked';
+        else if (ev.kind === 'file.rename' && hit !== canonicalHomePath(str(ev.to))) category = 'moved';
+        if (category === 'deleted' || category === 'moved') removedSeeded.add(hit);
+        addExisting(ev, category, hit);
         break;
       }
 
       case 'dns.query': {
         activity = true;
         const name = normalizeHost(ev.name);
-        if (c.hostOk(name)) {
+        const metadata = cloudMetadataTarget(name);
+        if (metadata) {
+          classify(ev, 'unexplained');
+          findings.add('net.cloud_metadata', metadata, { severity: 'high', classification: 'unexplained', title: CLOUD_METADATA_TITLE, seqs: [ev.seq] });
+        } else if (c.hostOk(name)) {
           classify(ev, 'explained');
         } else if (isPtrName(name)) {
           classify(ev, 'baseline');
@@ -486,7 +680,8 @@ export function evaluate({ events, contract, decoys, layers, coverage, exec, sin
         activity = true;
         const host = normalizeHost(ev.kind === 'http.request' ? ev.host : ev.sni);
         const hostKey = host || '(unknown host)';
-        const explained = c.hostOk(host);
+        const metadata = cloudMetadataTarget(host); // no claim explains it, whatever expected_hosts says
+        const explained = !metadata && c.hostOk(host);
         if (ev.kind === 'http.request' && ev.canned !== true && !UPLOAD_METHODS.has(str(ev.method).toUpperCase())) downloadAttempt = true;
         if (ev.kind === 'tls.failed') {
           tlsFailedHosts.add(hostKey);
@@ -502,6 +697,11 @@ export function evaluate({ events, contract, decoys, layers, coverage, exec, sin
           break;
         }
         classify(ev, 'unexplained');
+        if (metadata) {
+          // One finding per event: the specific rule replaces net.unexpected_host here.
+          findings.add('net.cloud_metadata', metadata, { severity: 'high', classification: 'unexplained', title: CLOUD_METADATA_TITLE, seqs: [ev.seq] });
+          break;
+        }
         unexpectedHosts.add(hostKey);
         findings.add('net.unexpected_host', hostKey, {
           severity: 'medium',
@@ -531,6 +731,14 @@ export function evaluate({ events, contract, decoys, layers, coverage, exec, sin
         }
         const ip = str(ev.dst_ip);
         const port = num(ev.dst_port);
+        // Before the sinkhole test: fd00:ec2::254 is in a private range, and the metadata address
+        // is never the sinkhole. Replaces net.ip_literal for this event, never added on top of it.
+        const metadata = cloudMetadataTarget(ip);
+        if (metadata) {
+          classify(ev, 'unexplained');
+          findings.add('net.cloud_metadata', metadata, { severity: 'high', classification: 'unexplained', title: CLOUD_METADATA_TITLE, seqs: [ev.seq] });
+          break;
+        }
         const toSink = sink ? ip === sink : isPrivateIp(ip);
         if (toSink || isLoopback(ip)) {
           classify(ev, 'baseline'); // the sinkhole answers every name, so this is any command's path
@@ -853,6 +1061,7 @@ export function evaluate({ events, contract, decoys, layers, coverage, exec, sin
     shimTools: [...shimTools],
     harnessGaveUp: harnessUnclean(layers, unwrap),
     remoteMarker,
+    forkFailure: FORK_FAILURE_RE.test(str(exec?.stderr_preview ?? exec?.stderr)),
     evidenceMode: str(cov.mode),
     exitCode: execInfo.exit_code,
     coverage: cov,
@@ -897,6 +1106,7 @@ export function buildCoverageNotes({
   shimTools = [],
   harnessGaveUp = false,
   remoteMarker = false,
+  forkFailure = false,
   evidenceMode = '',
   exitCode = null,
   coverage = {},
@@ -939,12 +1149,22 @@ export function buildCoverageNotes({
   // A timeout or OOM already has its own note; a plain non-zero exit gets this one.
   if (exitCode !== null && exitCode !== undefined && num(exitCode) !== 0 && !timedOut && coverage.oom_killed !== true) {
     notes.push(
-      `The command ended with an error (exit code ${num(exitCode)}), so part of it may not have run; what it would have done after that point was not observed. This can also happen when a command hits the sandbox's process limit.`,
+      `The command ended with an error (exit code ${num(exitCode)}), so it may not have finished everything it set out to do.${forkFailure ? " Its error output shows it could not start more processes, which happens when a command hits the sandbox's process limit." : ''}`,
     );
   }
+  // File changes (7.6): a run without the runsc log must never read as "nothing was deleted".
+  const fileops = coverage.fileops && typeof coverage.fileops === 'object' ? coverage.fileops : null;
+  if (fileops && fileops.recorded === false) {
+    notes.push('File deletions, renames and permission changes were not recorded for this run, so a command that removed or replaced files would not show it here.');
+  }
+  if (fileops && num(fileops.malformed) > 0) {
+    const n = num(fileops.malformed);
+    notes.push(`${n} recorded file change${n === 1 ? '' : 's'} had a name that could not be fully read (it contained a line break); the folder it pointed at is reported instead.`);
+  }
   // Partial evidence (7.2 / 7.3): a CLEAN with gaps must say so.
-  const dropped = num(coverage.gvisor_dropped) + num(coverage.decode_errors);
-  const capped = coverage.capped && typeof coverage.capped === 'object' ? Object.values(coverage.capped).reduce((a, b) => a + num(b), 0) : 0;
+  const dropped = num(coverage.gvisor_dropped) + num(coverage.decode_errors) + num(fileops?.decode_errors);
+  const capped =
+    (coverage.capped && typeof coverage.capped === 'object' ? Object.values(coverage.capped).reduce((a, b) => a + num(b), 0) : 0) + num(fileops?.capped);
   if (dropped > 0 || capped > 0) {
     const parts = [];
     if (dropped > 0) parts.push(`${dropped} trace record${dropped === 1 ? ' was' : 's were'} lost`);

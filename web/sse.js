@@ -13,6 +13,7 @@ export const EVENT_NAMES = [
   'evidence',
   'alert',
   'exec.finished',
+  'retry.started',
   'teardown',
   'verdict',
   'explanation',

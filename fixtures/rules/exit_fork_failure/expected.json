@@ -1,0 +1,8 @@
+{
+  "level": "CLEAN",
+  "rule_ids": [],
+  "severity_counts": {},
+  "notes_include": [
+    "The command ended with an error (exit code 2), so it may not have finished everything it set out to do. Its error output shows it could not start more processes, which happens when a command hits the sandbox's process limit."
+  ]
+}

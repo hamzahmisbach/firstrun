@@ -47,7 +47,7 @@ export const CATEGORY_OWNER = Object.freeze({
   package_manager_token: Object.freeze(['npm', 'npx', 'pnpm', 'yarn', 'corepack']),
   registry_token: Object.freeze(['docker']),
   vcs_token: Object.freeze(['git', 'gh']),
-  cloud_credentials: Object.freeze(['aws', 'gcloud', 'kubectl']),
+  cloud_credentials: Object.freeze(['aws', 'gcloud', 'kubectl', 'az', 'vault', 'aliyun']),
   ai_assistant_config: Object.freeze(['claude', 'gemini', 'codex']),
   ssh_private_key: Object.freeze(['ssh', 'scp', 'sftp']),
   ssh_meta: Object.freeze(['ssh', 'scp', 'sftp', 'git']),

@@ -10,14 +10,15 @@ const SYSTEM_PROMPT = readFileSync(new URL('../llm/prompts/explanation.md', impo
 const EXPLANATION_MAX_BYTES = 4 * 1024;
 const URL_SCHEME_RE = /https?:\/\//gi;
 // Internal vocabulary is rewritten in place rather than rejected: rejecting sent too many good
-// answers to the template (a quoted "zlib-layer-ok" was enough). Hyphenated tokens are left alone.
+// answers to the template (a quoted "zlib-layer-ok" was enough). Words inside a name are left alone:
+// zlib-layer-ok, layer.example.test, layer.txt and ~/.config/contract/app.yaml are facts, not jargon.
 const VOCABULARY = [
-  [/(?<![\w-])contracts?(?![\w-])/gi, 'what you were told'],
-  [/(?<![\w-])harness(?:es)?(?![\w-])/gi, 'decoder'],
-  [/(?<![\w-])layers(?![\w-])/gi, 'hidden parts'],
-  [/(?<![\w-])layer(?![\w-])/gi, 'hidden part'],
-  [/(?<![\w-])sinkholed(?![\w-])/gi, 'answered by a fake internet'],
-  [/(?<![\w-])sinkholes?(?![\w-])/gi, 'fake internet'],
+  [/(?<![\w./-])contracts?(?![\w/-]|\.\w)/gi, 'what you were told'],
+  [/(?<![\w./-])harness(?:es)?(?![\w/-]|\.\w)/gi, 'decoder'],
+  [/(?<![\w./-])layers(?![\w/-]|\.\w)/gi, 'hidden parts'],
+  [/(?<![\w./-])layer(?![\w/-]|\.\w)/gi, 'hidden part'],
+  [/(?<![\w./-])sinkholed(?![\w/-]|\.\w)/gi, 'answered by a fake internet'],
+  [/(?<![\w./-])sinkholes?(?![\w/-]|\.\w)/gi, 'fake internet'],
 ];
 // For CLEAN: "matched", "confirmed" and a positive "safe" are out; "not proof that it is safe"
 // is the one thing the reader must hear, so negated phrases are stripped before the check.
@@ -134,6 +135,8 @@ function buildUser(input) {
     d.field('FINDINGS', json(input?.findings ?? [])),
     d.field('LAYERS', json(input?.layers ?? [])),
     d.field('COVERAGE_NOTES', json(input?.coverage_notes ?? [])),
+    d.field('AI_READING_OF_THE_CODE', json(input?.ai_review ?? null)),
+    `RAN_TWICE: ${input?.ran_twice === true}`,
   ].join('\n\n');
 }
 

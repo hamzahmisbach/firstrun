@@ -6,6 +6,10 @@ set -eu
 
 case "${FIRSTRUN_PHASE:-execute}" in
   execute)
+    # A second try (docs/ARCHITECTURE.md 8.7) can answer "y" to prompts instead of reading nothing.
+    if [ "${FIRSTRUN_STDIN:-}" = "answers" ] && [ -r /work/answers.txt ]; then
+      exec timeout -s KILL "${FIRSTRUN_TIMEOUT:-60}" bash --noprofile --norc /work/cmd.sh </work/answers.txt
+    fi
     exec timeout -s KILL "${FIRSTRUN_TIMEOUT:-60}" bash --noprofile --norc /work/cmd.sh </dev/null
     ;;
   unwrap)

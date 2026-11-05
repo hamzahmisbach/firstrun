@@ -4,6 +4,6 @@
   "severity_counts": {},
   "notes_include": [
     "Evidence came from the fallback tracer; some paths or arguments may be truncated.",
-    "The command ended with an error (exit code 2), so part of it may not have run; what it would have done after that point was not observed. This can also happen when a command hits the sandbox's process limit."
+    "The command ended with an error (exit code 2), so it may not have finished everything it set out to do."
   ]
 }

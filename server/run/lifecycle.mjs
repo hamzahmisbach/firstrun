@@ -17,6 +17,7 @@ import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { LIMITS } from '../config.mjs';
+import { ANSWERS_FILE_TEXT, describeKnobs } from '../review/knobs.mjs';
 import { INTERPRETERS, names, sandboxRunArgs, sinkholeRunArgs, networkCreateArgs, inspectSinkIpArgs } from './docker.mjs';
 
 /** A failure with a run.error code from section 10.2 (sandbox_start_failed, internal, ...). */
@@ -62,8 +63,10 @@ export const MODULE_SPECS = Object.freeze({
   explainWriter: ['explain/writer.mjs', 'writeExplanation'],
   llmClient: ['llm/client.mjs', 'createLlm'],
   contract: ['llm/contract.mjs', 'deriveContract'],
-  decoder: ['unwrap/decoder.mjs', 'decodeLayers'],
+  decoder: ['unwrap/decoder-thread.mjs', 'decodeInWorker'],
   harness: ['unwrap/harness.mjs', 'runHarnessLoop'],
+  review: ['review/review.mjs', 'reviewRun'],
+  applyReview: ['review/apply.mjs', 'applyReview'],
 });
 
 /**
@@ -115,6 +118,20 @@ async function makeWorldReadable(dir) {
     const p = path.join(dir, entry.name);
     if (entry.isDirectory()) await makeWorldReadable(p);
     else await chmod(p, 0o644);
+  }
+}
+
+/** Remove runsc's `<cid>.<command>.log` files (7.6) for one container; the dir may not exist. */
+export async function removeRunscLogs(logDir, cid) {
+  if (!logDir || !CID_RE.test(cid)) return;
+  let names;
+  try {
+    names = await readdir(logDir);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (name.startsWith(`${cid}.`) && name.endsWith('.log')) await unlink(path.join(logDir, name)).catch(() => {});
   }
 }
 
@@ -190,6 +207,9 @@ function templateExplanation(verdict, findings, claim) {
     next_step: NEXT_STEP[level] ?? NEXT_STEP.SUSPICIOUS,
   };
 }
+
+const NOTE_REVIEW_NOT_RUN = 'The AI reading of the code did not run for this report, so this rests only on what was recorded in the sandbox.';
+const NOTE_SECOND_TRY = 'FirstRun ran the command a second time with changed conditions, because the code looked like it was waiting for them. Both runs are included here.';
 
 const CLEAN_NOTE =
   'CLEAN means nothing suspicious was observed in this run (Linux sandbox, 60 s, no internet), not proof that the command is safe.';
@@ -279,7 +299,8 @@ export function createLifecycle({ config, llm = null, storage, docker, modules =
     };
 
     // ---- teardown (step 10), idempotent, always run from finally
-    async function teardownSandbox() {
+    /** Containers, network and their records. The seed and command stay for a possible second try. */
+    async function teardownContainers() {
       clearTimeout(state.watchdog);
       const containers = [];
       if (state.sandbox) containers.push(names.sandbox(id));
@@ -287,15 +308,22 @@ export function createLifecycle({ config, llm = null, storage, docker, modules =
       if (containers.length) await docker.rmForce(containers);
       if (state.network) await docker.networkRm(id);
       state.sandbox = state.sinkhole = state.network = false;
+      await Promise.all([unlink(path.join(runDir, 'resolv.conf')).catch(() => {}), unlink(path.join(runDir, 'sb.cid')).catch(() => {})]);
+      for (const cid of state.cids) {
+        await unlink(path.join(config.traceDir, `${cid}.jsonl`)).catch(() => {});
+        await removeRunscLogs(config.runscLogDir, cid);
+      }
+      state.cids.clear();
+    }
+
+    async function teardownSandbox() {
+      await teardownContainers();
       await Promise.all([
         rm(dirs.seed, { recursive: true, force: true }),
         rm(dirs.work, { recursive: true, force: true }),
         rm(dirs.unwrap, { recursive: true, force: true }),
-        unlink(path.join(runDir, 'resolv.conf')).catch(() => {}),
-        unlink(path.join(runDir, 'sb.cid')).catch(() => {}),
       ]);
       for (let i = 0; i < state.unwrapCount; i++) await unlink(path.join(runDir, `unwrap-${i}.cid`)).catch(() => {});
-      for (const cid of state.cids) await unlink(path.join(config.traceDir, `${cid}.jsonl`)).catch(() => {});
     }
 
     async function readCid(file) {
@@ -377,7 +405,10 @@ export function createLifecycle({ config, llm = null, storage, docker, modules =
         clearTimeout(watchdog);
         await docker.rmForce([name]);
         const cid = await readCid(path.join(runDir, `unwrap-${n}.cid`));
-        if (cid) await unlink(path.join(config.traceDir, `${cid}.jsonl`)).catch(() => {});
+        if (cid) {
+          await unlink(path.join(config.traceDir, `${cid}.jsonl`)).catch(() => {});
+          await removeRunscLogs(config.runscLogDir, cid);
+        }
         await unlink(path.join(runDir, `unwrap-${n}.cid`)).catch(() => {});
         await unlink(file).catch(() => {});
       }
@@ -407,24 +438,36 @@ export function createLifecycle({ config, llm = null, storage, docker, modules =
       }
     }
 
-    // ---- steps 7-9
-    async function execute(decoys) {
+    // ---- steps 7-9. A second try (8.7) passes knobs and shifts its events after the first run's.
+    async function execute(decoys, { attempt = 1, knobs = null, seqOffset = 0, tOffset = 0 } = {}) {
       const name = names.sandbox(id);
+      const limitMs = knobs ? knobs.timeoutS * 1000 : L.execTimeoutMs;
+      const shift =
+        attempt === 1
+          ? (event) => event
+          : (event) => ({
+              ...event,
+              attempt,
+              seq: event.seq + seqOffset,
+              t_rel_ms: (event.t_rel_ms ?? 0) + tOffset,
+              ...(Number.isInteger(event.event_seq) ? { event_seq: event.event_seq + seqOffset } : {}),
+            });
       // SSE order (10.2): exec.started precedes every evidence/alert. The tails can deliver the
       // first events before the T0 poll notices, so they are held until exec.started is out.
       let started = false;
       const held = [];
-      const emitEvidence = (sse, event) => (started ? ctx.emit(sse, { event }) : held.push([sse, event]));
+      const emitEvidence = (sse, event) => (started ? ctx.emit(sse, { event: shift(event) }) : held.push([sse, event]));
       const markStarted = (cid) => {
         started = true;
-        ctx.emit('exec.started', { container_id: cid, timeout_s: LIMITS.sandbox.execTimeoutS });
-        for (const [sse, event] of held.splice(0)) ctx.emit(sse, { event });
+        ctx.emit('exec.started', { container_id: cid, timeout_s: limitMs / 1000, attempt });
+        for (const [sse, event] of held.splice(0)) ctx.emit(sse, { event: shift(event) });
       };
       const evidence = m.evidence
         ? m.evidence({
             runId: id,
             sinkholeDir: dirs.sinkhole,
             traceDir: config.traceDir,
+            runscLogDir: config.runscLogDir ?? null,
             decoys,
             onEvent: (event) => emitEvidence('evidence', event),
             onAlert: (event) => emitEvidence('alert', event),
@@ -434,14 +477,14 @@ export function createLifecycle({ config, llm = null, storage, docker, modules =
       evidence?.startSinkhole();
       const t0 = trackT0(evidence);
       const startedMs = now();
-      const proc = docker.runAttached(sandboxRunArgs({ id, runDir }), { maxBytes: LIMITS.output.streamMaxBytes });
+      const proc = docker.runAttached(sandboxRunArgs({ id, runDir, knobs }), { maxBytes: LIMITS.output.streamMaxBytes });
       state.sandbox = true;
       let killedBy = null;
       state.watchdog = setTimeout(() => {
         killedBy = 'watchdog';
         log({ level: 'warn', msg: 'run.watchdog', run_id: id });
         docker.kill(name);
-      }, L.watchdogMs);
+      }, knobs ? Math.min(L.watchdogMs, limitMs + 15_000) : L.watchdogMs);
 
       const cidText = await waitForFile(path.join(runDir, 'sb.cid'), L.cidfileWaitMs, proc.done, now);
       const cid = cidText ? cidText.trim() : null;
@@ -496,7 +539,7 @@ export function createLifecycle({ config, llm = null, storage, docker, modules =
 
       // 124 is `timeout`'s own code; 137 is any SIGKILL (timeout, watchdog, OOM, the command itself),
       // so it only counts as a timeout when the run actually reached the limit.
-      const reachedLimit = durationMs >= L.execTimeoutMs - L.timeoutSlackMs;
+      const reachedLimit = durationMs >= limitMs - L.timeoutSlackMs;
       const timedOut = killedBy === 'watchdog' || r.code === 124 || (r.code === 137 && reachedLimit && !oomKilled);
       if (timedOut && !killedBy) killedBy = 'timeout';
       const exitCode = r.code ?? (r.signal ? 128 : -1);
@@ -531,9 +574,34 @@ export function createLifecycle({ config, llm = null, storage, docker, modules =
         stderr_bytes: r.stderrBytes,
         truncated: r.truncated || r.stdoutBytes > LIMITS.output.previewMaxBytes || r.stderrBytes > LIMITS.output.previewMaxBytes,
       };
-      ctx.emit('exec.finished', { ...exec, coverage });
-      stageLog('exec', { ms: durationMs, exit_code: exitCode, timed_out: timedOut, killed_by: killedBy, events: ev.events?.length ?? 0 });
-      return { exec, output, events: ev.events ?? [], coverage };
+      ctx.emit('exec.finished', { ...exec, coverage, attempt });
+      stageLog('exec', { attempt, ms: durationMs, exit_code: exitCode, timed_out: timedOut, killed_by: killedBy, events: ev.events?.length ?? 0 });
+      return { exec, output, events: (ev.events ?? []).map(shift), coverage };
+    }
+
+    /**
+     * One more run with settings from the fixed menu (review/knobs.mjs), in a fresh sandbox and a
+     * fresh fake internet. A failure here costs nothing: the first run's evidence stands.
+     * @returns {Promise<object|null>} execute()'s result, or null if it could not run
+     */
+    async function secondTry(decoys, retry, { seqOffset, tOffset }) {
+      ctx.emit('retry.started', { why: retry.why, quote: retry.quote, settings: describeKnobs(retry.knobs) });
+      try {
+        await rm(dirs.sinkhole, { recursive: true, force: true });
+        await ensureDir(dirs.sinkhole, 0o777);
+        await ensureDir(path.join(dirs.sinkhole, 'bodies'), 0o777);
+        await setupNetwork();
+        if (retry.knobs.answerYes) {
+          await writeFile(path.join(dirs.work, 'answers.txt'), ANSWERS_FILE_TEXT, { mode: 0o644 });
+          await chmod(path.join(dirs.work, 'answers.txt'), 0o644);
+        }
+        return await execute(decoys, { attempt: 2, knobs: retry.knobs, seqOffset, tOffset });
+      } catch (err) {
+        log({ level: 'warn', msg: 'run.retry_failed', run_id: id, code: err?.code ?? null, err: err?.message ?? String(err) });
+        return null;
+      } finally {
+        await teardownContainers();
+      }
     }
 
     // =========================================================================================
@@ -554,11 +622,14 @@ export function createLifecycle({ config, llm = null, storage, docker, modules =
 
       // step 4
       let decoys = [];
+      let seededPaths = [];
       if (m.canary) {
         const c = m.canary();
         decoys = Array.isArray(c?.decoys) ? c.decoys : [];
-        if (m.seed) await m.seed(dirs.seed, decoys);
-        else notes.push('Seed module unavailable: the decoy home directory was empty.');
+        if (m.seed) {
+          const s = await m.seed(dirs.seed, decoys);
+          seededPaths = Array.isArray(s?.seededPaths) ? s.seededPaths : [];
+        } else notes.push('Seed module unavailable: the decoy home directory was empty.');
       } else {
         notes.push('Canary module unavailable: no decoy credentials were planted.');
       }
@@ -569,7 +640,7 @@ export function createLifecycle({ config, llm = null, storage, docker, modules =
       let decoded = { layers: [], finalText: run.input.command, needsHarness: false };
       if (m.decoder) {
         try {
-          decoded = m.decoder(run.input.command) ?? decoded;
+          decoded = (await m.decoder(run.input.command)) ?? decoded;
           layers = Array.isArray(decoded.layers) ? [...decoded.layers] : [];
           for (const layer of layers) ctx.emit('unwrap.layer', { layer: sseLayer(layer) });
         } catch (err) {
@@ -616,10 +687,10 @@ export function createLifecycle({ config, llm = null, storage, docker, modules =
 
       // steps 7-9
       ctx.phase('exec');
-      const { exec, output, events, coverage } = await execute(decoys);
+      const { exec, output, events: firstEvents, coverage } = await execute(decoys);
       lap('exec_ms');
-      // step 10, right away (the finally block repeats it harmlessly)
-      await teardownSandbox();
+      // step 10, right away (the finally block repeats it harmlessly); the seed stays for a retry
+      await teardownContainers();
 
       // step 11: wait (bounded) for the harness loop and the contract
       if (wantHarness) ctx.phase('unwrap');
@@ -643,28 +714,80 @@ export function createLifecycle({ config, llm = null, storage, docker, modules =
       mark = now();
       coverage.notes = [...(coverage.notes ?? []), ...notes];
       const { contract, meta: contractMeta } = contractResult;
-      let verdict;
-      let findings;
-      let classifications = {};
-      if (m.rules) {
-        const r = m.rules({
+      let events = firstEvents;
+      const runRules = () =>
+        m.rules({
           events,
           contract,
           contractMeta,
           decoys,
+          seededPaths,
           layers,
           coverage,
           exec: { ...exec, ...output },
           sinkIp: state.sinkIp,
           unwrap: { stopped: decoded.stopped ?? null, harness: harnessResult ? { stoppedReason: harnessResult.stoppedReason } : null },
         });
-        verdict = r.verdict;
-        findings = Array.isArray(r.findings) ? r.findings : [];
-        classifications = r.classifications ?? {};
+      let ruled = m.rules ? runRules() : null;
+
+      // AI review (8.7): a reading of the code that can only raise the verdict, and one more run
+      // when the code shows it stopped because of something in this sandbox. Proof needs neither.
+      let review = null;
+      let reviewMeta = { source: 'skipped' };
+      const attempts = [{ attempt: 1, exit_code: exec.exit_code, timed_out: exec.timed_out, duration_ms: exec.duration_ms, event_count: firstEvents.length }];
+      if (llm && m.review && ruled && ruled.verdict.level !== 'MALICIOUS') {
+        ctx.phase('review');
+        const r = await m.review(llm, { input: run.input, layers, events, exec, decoys, sinkIp: state.sinkIp });
+        review = r?.review ?? null;
+        reviewMeta = r?.meta ?? { source: 'failed', reason: 'internal' };
+        timing.review_ms = reviewMeta.ms ?? 0;
+        stageLog('review', { source: reviewMeta.source, risk: review?.risk ?? null, retry: Boolean(r?.retry), ms: timing.review_ms });
+        if (r?.retry) {
+          const seqOffset = firstEvents.reduce((max, e) => Math.max(max, e.seq ?? 0), 0);
+          const t = now();
+          const second = await secondTry(decoys, r.retry, { seqOffset, tOffset: exec.duration_ms });
+          timing.retry_ms = now() - t;
+          attempts.push({
+            attempt: 2,
+            why: r.retry.why,
+            quote: r.retry.quote,
+            settings: describeKnobs(r.retry.knobs),
+            ...(second
+              ? {
+                  exit_code: second.exec.exit_code,
+                  timed_out: second.exec.timed_out,
+                  duration_ms: second.exec.duration_ms,
+                  event_count: second.events.length,
+                  stdout_preview: previewOf(Buffer.from(second.output.stdout_preview), 4096),
+                  stderr_preview: previewOf(Buffer.from(second.output.stderr_preview), 4096),
+                }
+              : { failed: true }),
+          });
+          if (second) {
+            events = [...firstEvents, ...second.events];
+            ruled = runRules();
+          }
+        }
+      } else if (ruled && ruled.verdict.level !== 'MALICIOUS') {
+        reviewMeta = { source: 'skipped', reason: llm ? 'module_missing' : 'llm_disabled' };
+      }
+
+      let verdict;
+      let findings;
+      let classifications = {};
+      if (ruled) {
+        verdict = ruled.verdict;
+        findings = Array.isArray(ruled.findings) ? ruled.findings : [];
+        classifications = ruled.classifications ?? {};
       } else {
         verdict = { level: 'SUSPICIOUS', rule_ids: [], coverage_notes: ['Rules engine unavailable: no verdict was computed for this run.', CLEAN_NOTE] };
         findings = [];
       }
+      if (m.applyReview && review) ({ verdict, findings } = m.applyReview({ verdict, findings, review }));
+      const extraNotes = [];
+      if (reviewMeta.source !== 'llm' && verdict.level !== 'MALICIOUS') extraNotes.push(NOTE_REVIEW_NOT_RUN);
+      if (attempts.length > 1 && !attempts[1].failed) extraNotes.push(NOTE_SECOND_TRY);
+      if (extraNotes.length) verdict = { ...verdict, coverage_notes: [...(verdict.coverage_notes ?? []), ...extraNotes] };
       ctx.emit('verdict', { verdict, findings });
       lap('rules_ms');
 
@@ -673,7 +796,7 @@ export function createLifecycle({ config, llm = null, storage, docker, modules =
       let explanation = null;
       let explanationMeta = { source: 'template' };
       const explanationInput = m.explainInput
-        ? m.explainInput({ input: run.input, verdict, findings, layers, contract, coverage, events, decoys })
+        ? m.explainInput({ input: run.input, verdict, findings, layers, contract, coverage, events, decoys, review, attempts })
         : null;
       if (llm && m.explainWriter && explanationInput) {
         try {
@@ -720,6 +843,9 @@ export function createLifecycle({ config, llm = null, storage, docker, modules =
         timing,
         modelsUsed,
         classifications,
+        review,
+        reviewMeta,
+        attempts,
       };
       report = m.report ? m.report(args) : fallbackReport(args);
       let where;

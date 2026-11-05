@@ -110,6 +110,9 @@ export function buildReport({
   output,
   timing,
   modelsUsed,
+  review,
+  reviewMeta,
+  attempts,
   classifications,
 }) {
   const level = verdict?.level ?? 'CLEAN';
@@ -169,6 +172,9 @@ export function buildReport({
     },
     timing: timing && typeof timing === 'object' ? timing : {},
     models_used: Array.isArray(modelsUsed) ? modelsUsed : [],
+    review: review && typeof review === 'object' ? review : null,
+    review_meta: reviewMeta && typeof reviewMeta === 'object' ? reviewMeta : { source: 'skipped' },
+    attempts: Array.isArray(attempts) ? attempts : [],
   };
   if (output !== undefined) {
     const trimmed = trimOutput(output);

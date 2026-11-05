@@ -29,6 +29,24 @@ test('POST /api/runs: 5 per 10 minutes per IP, then 429 with Retry-After until a
   assert.deepEqual(l.take('postRun', '203.0.113.1'), { ok: true });
 });
 
+test('refund gives the taken token back to every bucket, never above capacity', () => {
+  const now = clock();
+  const l = limiter(now);
+  const ip = '203.0.113.5';
+  for (let i = 0; i < 5; i++) {
+    assert.deepEqual(l.take('postRun', ip), { ok: true });
+    l.refund('postRun', ip);
+  }
+  assert.deepEqual(l.take('postRun', ip), { ok: true }, 'refunded takes spent nothing');
+  l.refund('postRun', ip);
+  l.refund('postRun', ip); // one too many: capped at capacity
+  for (let i = 0; i < 5; i++) assert.deepEqual(l.take('postRun', ip), { ok: true });
+  assert.equal(l.take('postRun', ip).ok, false);
+  l.refund('postRun', '203.0.113.6'); // unknown IP: nothing to give back, no entry created
+  assert.equal(l.size, 1);
+  assert.throws(() => l.refund('nope', ip), /unknown rate-limit policy/);
+});
+
 test('multi-bucket policies take a token from every bucket or from none', () => {
   const now = clock();
   const l = limiter(now, {

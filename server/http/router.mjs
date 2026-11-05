@@ -5,14 +5,15 @@ import { LIMITS } from '../config.mjs';
 import { clientIp } from './ratelimit.mjs';
 
 export class HttpError extends Error {
-  /** @param {{retryAfterS?: number, headers?: object, close?: boolean}} [opts] */
-  constructor(status, code, message, { retryAfterS, headers, close } = {}) {
+  /** @param {{retryAfterS?: number, headers?: object, close?: boolean, fields?: object}} [opts] fields: extra JSON body fields */
+  constructor(status, code, message, { retryAfterS, headers, close, fields } = {}) {
     super(message);
     this.status = status;
     this.code = code;
     this.retryAfterS = retryAfterS;
     this.headers = headers;
     this.close = close;
+    this.fields = fields;
   }
 }
 
@@ -29,7 +30,7 @@ export function sendJson(res, status, body, headers = {}) {
 }
 
 function sendError(res, err) {
-  const body = { error: err.code, message: err.message };
+  const body = { error: err.code, message: err.message, ...err.fields };
   const headers = { ...err.headers };
   if (err.retryAfterS != null) {
     body.retry_after_s = err.retryAfterS;

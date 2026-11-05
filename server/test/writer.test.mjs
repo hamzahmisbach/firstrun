@@ -94,6 +94,13 @@ test('internal vocabulary and "matched/confirmed/safe" on CLEAN fall back to the
   assert.ok(reworded.explanation.finding_notes[0].text.startsWith('The hidden part printed it.'));
   assert.ok([...reworded.explanation.finding_notes[0].text].length <= 200);
   assert.ok(Explanation.safeParse(reworded.explanation).success);
+  // A word inside a host, file or path name is a fact about the run, so it stays as it is.
+  const names = await writeExplanation(
+    fakeLlm(good({ paragraphs: ['It contacted layer.example.test, opened ~/.config/contract/app.yaml and wrote layer.txt. The layer ran, and so did the harness.'] })),
+    INPUT,
+    { template },
+  );
+  assert.equal(names.explanation.paragraphs[0], 'It contacted layer.example.test, opened ~/.config/contract/app.yaml and wrote layer.txt. The hidden part ran, and so did the decoder.');
   // Overclaiming on CLEAN is still rejected.
   const cases = [
     [cleanInput, clean({ headline: 'Claim matched: nothing suspicious seen' })],

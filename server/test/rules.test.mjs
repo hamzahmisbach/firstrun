@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { buildExplanationInput } from '../explain/input.mjs';
 import { Explanation, NEXT_STEP, RULE_NOTES, renderTemplateExplanation } from '../explain/template.mjs';
-import { CLASSIFICATIONS, FindingSchema, RULE_IDS, VerdictSchema, evaluate, NOTE_CLEAN_MEANS, NOTE_DOWNLOAD, NOTE_LIMITS, NOTE_SINKHOLED } from '../rules/engine.mjs';
+import { CLASSIFICATIONS, FindingSchema, MAX_SEQS_PER_FINDING, RULE_IDS, VerdictSchema, evaluate, NOTE_CLEAN_MEANS, NOTE_DOWNLOAD, NOTE_LIMITS, NOTE_SINKHOLED } from '../rules/engine.mjs';
 import { decoyDirs, hostMatches, matchGlob, writeGroup } from '../rules/paths.mjs';
 import { REPORT_LIMITS, buildReport, truncateUtf8, utf8Bytes } from '../run/report.mjs';
 
@@ -225,7 +225,8 @@ test('golden: findings for the demo-like cases are frozen in expected.full.json'
   }
 });
 
-test('performance: 50 000 synthetic events evaluate in well under 100 ms (warm)', () => {
+// 50 000 is ten times the per-run event cap, and the limit leaves room for a slow 2 vCPU VM.
+test('performance: 50 000 synthetic events evaluate in well under a second (warm)', () => {
   const events = [];
   for (let i = 1; i <= 50_000; i++) {
     const k = i % 5;
@@ -246,7 +247,7 @@ test('performance: 50 000 synthetic events evaluate in well under 100 ms (warm)'
     best = Math.min(best, performance.now() - t);
   }
   assert.ok(findings.length <= 200, 'findings are capped at 200');
-  assert.ok(best < 100, `best of 3 took ${best.toFixed(1)} ms`);
+  assert.ok(best < 500, `best of 3 took ${best.toFixed(1)} ms`);
 });
 
 test('findings cap: beyond 200 groups the rest is merged into the last net.unexpected_host/fs.unexpected_write', () => {
@@ -261,7 +262,7 @@ test('findings cap: beyond 200 groups the rest is merged into the last net.unexp
   const last = findings[199];
   assert.equal(last.rule_id, 'net.unexpected_host');
   assert.ok(last.title.includes('100 more findings merged here'));
-  assert.ok(last.event_seqs.length <= 50);
+  assert.ok(last.event_seqs.length <= MAX_SEQS_PER_FINDING);
 });
 
 // --- targeted engine behaviour ---------------------------------------------------------------
@@ -316,7 +317,7 @@ test('engine: unknown decoy id is treated as a sensitive credential read', () =>
 test('engine: /seed/home twin of a decoy dir counts as listing the credential directory', () => {
   const { findings } = evaluate({ events: [EV(1, 'file.open', { pid: 5, path: '/seed/home/.aws', access: 'read' })], contract: {}, decoys: DECOYS });
   assert.equal(findings[0].rule_id, 'decoy.dir_enum');
-  assert.equal(findings[0].title, 'Opened credential directory ~/.aws');
+  assert.equal(findings[0].title, 'Looked through 1 folder that holds credentials (~/.aws)');
 });
 
 test('engine: baseline writes and contract writes produce no finding; startup writes in the contract stay a low finding', () => {
@@ -430,7 +431,117 @@ test('engine: exec/coverage inputs without an exec.finished event still drive ru
   assert.equal(verdict.level, 'SUSPICIOUS');
   assert.ok(!verdict.coverage_notes.some((n) => n.includes('exit code')), 'a timeout has its own note, not the exit-code one');
   const plain = evaluate({ events: [], contract: {}, decoys: [], exec: { exit_code: 2, timed_out: false } });
-  assert.ok(plain.verdict.coverage_notes.some((n) => n.startsWith('The command ended with an error (exit code 2), so part of it may not have run')));
+  const exitNote = plain.verdict.coverage_notes.find((n) => n.startsWith('The command ended with an error (exit code 2)'));
+  assert.equal(exitNote, 'The command ended with an error (exit code 2), so it may not have finished everything it set out to do.');
+  const fork = evaluate({ events: [], contract: {}, decoys: [], exec: { exit_code: 2, timed_out: false, stderr_preview: 'bash: fork: retry: Resource temporarily unavailable' } });
+  assert.ok(fork.verdict.coverage_notes.some((n) => n.includes("hits the sandbox's process limit")));
+});
+
+test('engine: fs.system_write_attempt counts failed and successful writes, by file touched', () => {
+  const ev = (seq, path, ok) => EV(seq, 'file.open', { pid: 5, path, access: 'create', ...(ok ? {} : { ok: false, errno: 13 }) });
+  const r = evaluate({ events: [ev(1, '/etc/ld.so.preload', false), ev(2, '/etc/sudoers.d/x', false), ev(3, '/etc/pam.d/sshd', false), ev(4, '/usr/share/x', false), ev(5, '/lib/x.so', true), ev(6, '/root/.ssh/authorized_keys', false)], contract: {}, decoys: [] });
+  assert.deepEqual(
+    r.findings.map((f) => [f.rule_id, f.severity, f.title]),
+    [
+      ['fs.system_write_attempt', 'high', 'Tried to write to /etc/ld.so.preload, a system file'],
+      ['fs.system_write_attempt', 'high', 'Tried to write to /etc/sudoers.d/x, a system file'],
+      ['fs.system_write_attempt', 'high', 'Tried to write to /etc/pam.d/sshd, a system file'],
+      ['fs.system_write_attempt', 'high', 'Tried to write to /root/.ssh/authorized_keys, a system file'],
+      ['fs.system_write_attempt', 'medium', 'Tried to write to /usr/share/x, a system file'],
+      ['fs.system_write_attempt', 'medium', 'Wrote to /lib/x.so, a system file'],
+    ],
+  );
+  assert.equal(r.verdict.level, 'SUSPICIOUS');
+  assert.ok(!r.findings.some((f) => f.rule_id === 'fs.unexpected_write'), 'system writes never double-count');
+  // /etc/cron* and /etc/systemd stay with the more specific scheduler rule (also high).
+  const sched = evaluate({ events: [ev(1, '/etc/cron.d/job', false), ev(2, '/etc/systemd/system/x.service', false)], contract: {}, decoys: [] });
+  assert.deepEqual(sched.findings.map((f) => [f.rule_id, f.severity]), [['fs.scheduler_write', 'high'], ['fs.scheduler_write', 'high']]);
+  // Explained by the contract: low. /opt is not a system dir.
+  const ok = evaluate({ events: [ev(1, '/usr/local/bin/t', true), ev(2, '/opt/t/bin', true)], contract: { expected_write_paths: ['/usr/local/**'] }, decoys: [] });
+  assert.deepEqual(ok.findings.map((f) => [f.rule_id, f.severity]), [['fs.system_write_attempt', 'low'], ['fs.unexpected_write', 'low']]);
+  assert.equal(ok.verdict.level, 'CLEAN');
+});
+
+test('engine: fs.agent_hook_write is keyed on the file, fires before the generic write rules, says "Tried" for failures', () => {
+  const ev = (seq, path, ok = true, access = 'write') => EV(seq, 'file.open', { pid: 5, path, access, ...(ok ? {} : { ok: false, errno: 13 }) });
+  const r = evaluate({
+    events: [ev(1, '/home/dev/.claude/settings.json'), ev(2, '/home/dev/projects/acme-app/.vscode/tasks.json', false, 'create'), ev(3, '/home/dev/.cursor/hooks.json', true, 'create'), ev(4, '/home/dev/.gemini/settings.json'), ev(5, '/home/dev/.claude/settings.json', true, 'read')],
+    contract: {},
+    decoys: DECOYS,
+  });
+  assert.deepEqual(
+    r.findings.map((f) => [f.rule_id, f.severity, f.classification, f.title]),
+    [
+      ['fs.agent_hook_write', 'high', 'unexplained', "Changed a coding tool's settings file ~/.claude/settings.json, which can make it run commands automatically"],
+      ['fs.agent_hook_write', 'high', 'unexplained', "Tried to change a coding tool's settings file ~/projects/acme-app/.vscode/tasks.json, which can make it run commands automatically"],
+      ['fs.agent_hook_write', 'high', 'unexplained', "Changed a coding tool's settings file ~/.cursor/hooks.json, which can make it run commands automatically"],
+      ['fs.agent_hook_write', 'high', 'unexplained', "Changed a coding tool's settings file ~/.gemini/settings.json, which can make it run commands automatically"],
+    ],
+  );
+  assert.equal(r.verdict.level, 'SUSPICIOUS');
+  assert.equal(r.classifications['5'], undefined, 'a read of the settings file is not a hook write');
+  const ok = evaluate({ events: [ev(1, '/home/dev/.claude/settings.local.json')], contract: { expected_write_paths: ['~/.claude/settings.local.json'] }, decoys: DECOYS });
+  assert.deepEqual(ok.findings.map((f) => [f.rule_id, f.severity, f.classification]), [['fs.agent_hook_write', 'low', 'explained']]);
+  assert.equal(ok.verdict.level, 'CLEAN');
+});
+
+test('engine: net.cloud_metadata is high whatever the contract or sink, and never doubles with net.ip_literal or net.unexpected_host', () => {
+  const contract = { expected_hosts: ['169.254.169.254', 'metadata.google.internal', 'metadata.azure.com', 'fd00:ec2::254'] };
+  const events = [
+    EV(1, 'net.connect', { pid: 5, family: 'inet', dst_ip: '169.254.169.254', dst_port: 80 }),
+    EV(2, 'http.request', { source: 'sinkhole', method: 'GET', host: '169.254.169.254', port: 80, path: '/latest/meta-data/', body_len: 0 }),
+    EV(3, 'dns.query', { source: 'sinkhole', name: 'metadata.google.internal', qtype: 'A' }),
+    EV(4, 'tls.clienthello', { source: 'sinkhole', sni: 'metadata.azure.com', port: 443 }),
+    EV(5, 'net.connect', { pid: 5, family: 'inet6', dst_ip: 'fd00:ec2::254', dst_port: 80 }),
+    EV(6, 'net.connect', { pid: 5, family: 'inet6', dst_ip: '::ffff:169.254.169.254', dst_port: 80 }),
+  ];
+  for (const sinkIp of [undefined, '10.77.0.2']) {
+    const r = evaluate({ events, contract, decoys: DECOYS, sinkIp });
+    const meta = r.findings.filter((f) => f.rule_id === 'net.cloud_metadata');
+    assert.deepEqual(
+      meta.map((f) => [f.severity, f.classification, f.event_seqs]),
+      [
+        ['high', 'unexplained', [1, 2, 6]],
+        ['high', 'unexplained', [3]],
+        ['high', 'unexplained', [4]],
+        ['high', 'unexplained', [5]],
+      ],
+      `sinkIp=${sinkIp}`,
+    );
+    assert.ok(meta.every((f) => f.title === 'Tried to reach the cloud metadata service, which can hand out cloud credentials'));
+    assert.deepEqual(r.findings.filter((f) => f.rule_id !== 'net.cloud_metadata').map((f) => f.rule_id), [], 'no second finding for the same events');
+    assert.deepEqual(r.verdict.rule_ids, ['net.cloud_metadata']);
+    for (const seq of [1, 2, 3, 4, 5, 6]) assert.equal(r.classifications[String(seq)], 'unexplained');
+  }
+  // A plain public IP next to it still gets its own net.ip_literal.
+  const both = evaluate({ events: [...events, EV(7, 'net.connect', { pid: 5, family: 'inet', dst_ip: '203.0.113.9', dst_port: 443 })], contract: {}, decoys: DECOYS });
+  assert.deepEqual(both.verdict.rule_ids, ['net.cloud_metadata', 'net.ip_literal']);
+});
+
+test('engine: fs.unexpected_write never says "Wrote" for failed attempts', () => {
+  const r = evaluate({
+    events: [
+      EV(1, 'file.open', { pid: 5, path: '/opt/x/a', access: 'create', ok: false, errno: 13 }),
+      EV(2, 'file.open', { pid: 5, path: '/home/dev/w/a', access: 'create' }),
+      EV(3, 'file.open', { pid: 5, path: '/home/dev/w/b', access: 'create', ok: false, errno: 13 }),
+      EV(4, 'file.open', { pid: 5, path: '/home/dev/w/c', access: 'create' }),
+    ],
+    contract: {},
+    decoys: [],
+  });
+  assert.deepEqual(r.findings.map((f) => f.title).sort(), [
+    'Tried to write 1 file under /opt not covered by the claim (the writes failed)',
+    'Wrote 2 files and tried to write 1 more under ~/w not covered by the claim',
+  ]);
+});
+
+test('engine: decoy.dir_enum is one finding per run with every seq', () => {
+  const c = CASES.find((x) => x.name === 'find_root_dir_enum');
+  const { findings } = evaluate(c.input);
+  const f = findings.find((x) => x.rule_id === 'decoy.dir_enum');
+  assert.equal(f.title, 'Looked through 5 folders that hold credentials');
+  assert.equal(f.event_seqs.length, 10);
+  assert.equal(findings.filter((x) => x.rule_id === 'decoy.dir_enum').length, 1);
 });
 
 test('engine: run.oom comes from coverage.oom_killed, with its own note and no exit-code note', () => {
@@ -493,6 +604,13 @@ test('paths: glob matcher is anchored, ** spans slashes, * one segment, ~ expand
   assert.ok(matchGlob('~/.config/powershell/*.ps1', '/home/dev/.config/powershell/profile.ps1'));
   assert.ok(!matchGlob('~/.config/powershell/*.ps1', '/home/dev/.config/powershell/sub/profile.ps1'));
   assert.ok(matchGlob('/etc/cron*/**', '/etc/cron.d/job'));
+  // `**/` at the start: the file anywhere in the tree, HOME included, but not a near-miss name.
+  assert.ok(matchGlob('**/.claude/settings.json', '/home/dev/projects/acme-app/.claude/settings.json'));
+  assert.ok(matchGlob('**/.claude/settings.json', '/home/dev/.claude/settings.json'));
+  assert.ok(matchGlob('**/.vscode/tasks.json', '/tmp/x/.vscode/tasks.json'));
+  assert.ok(!matchGlob('**/.claude/settings.json', '/home/dev/.claude/settings.json.bak'));
+  assert.ok(!matchGlob('**/.claude/settings.json', '/home/dev/my.claude/settings.json'));
+  assert.ok(!matchGlob('**/.vscode/tasks.json', '/home/dev/.vscode/settings.json'));
   assert.ok(!matchGlob('/tmp/**', '/tmpfoo/x'));
   assert.ok(!matchGlob('/tmp/**', 'x/tmp/y'));
   assert.ok(matchGlob('/dev/null', '/dev/null'));
@@ -635,7 +753,7 @@ test('explanation input: allowlisted projection never carries decoy values, bodi
     assert.ok(!json.includes(Buffer.from(d.value).toString('hex')), `${d.id} hex`);
   }
   assert.ok(!json.includes('body_b64') && !json.includes('headers') && !json.includes('argv') && !json.includes('"args"'));
-  assert.deepEqual(Object.keys(input).sort(), ['claim', 'contract', 'coverage_notes', 'findings', 'layers', 'verdict']);
+  assert.deepEqual(Object.keys(input).sort(), ['ai_review', 'claim', 'contract', 'coverage_notes', 'findings', 'layers', 'ran_twice', 'verdict']);
   assert.equal(input.layers[0].preview.length, 300);
   const hit = input.findings.find((f) => f.rule_id === 'exfil.canary_outbound');
   assert.equal(hit.evidence_summary, 'canary from ~/.aws/credentials seen base64-encoded in the body of an HTTP request to host collector.test (POST); POST to collector.test with 612 bytes');

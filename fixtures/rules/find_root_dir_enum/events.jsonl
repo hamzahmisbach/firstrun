@@ -1,0 +1,14 @@
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":1,"ts_ms":1762250000100,"t_rel_ms":100,"source":"gvisor","kind":"proc.exec","pid":50,"ppid":7,"exe":"/usr/bin/find","argv":["find","/"]}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":2,"ts_ms":1762250000200,"t_rel_ms":200,"source":"gvisor","kind":"file.open","pid":60,"path":"/home/dev/.ssh","access":"read"}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":3,"ts_ms":1762250000300,"t_rel_ms":300,"source":"gvisor","kind":"file.open","pid":60,"path":"/seed/home/.ssh","access":"read"}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":4,"ts_ms":1762250000400,"t_rel_ms":400,"source":"gvisor","kind":"file.open","pid":60,"path":"/home/dev/.aws","access":"read"}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":5,"ts_ms":1762250000500,"t_rel_ms":500,"source":"gvisor","kind":"file.open","pid":60,"path":"/seed/home/.aws","access":"read"}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":6,"ts_ms":1762250000600,"t_rel_ms":600,"source":"gvisor","kind":"file.open","pid":60,"path":"/home/dev/.config/gh","access":"read"}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":7,"ts_ms":1762250000700,"t_rel_ms":700,"source":"gvisor","kind":"file.open","pid":60,"path":"/seed/home/.config/gh","access":"read"}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":8,"ts_ms":1762250000800,"t_rel_ms":800,"source":"gvisor","kind":"file.open","pid":60,"path":"/home/dev/.config/Exodus/exodus.wallet","access":"read"}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":9,"ts_ms":1762250000900,"t_rel_ms":900,"source":"gvisor","kind":"file.open","pid":60,"path":"/seed/home/.config/Exodus/exodus.wallet","access":"read"}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":10,"ts_ms":1762250001000,"t_rel_ms":1000,"source":"gvisor","kind":"file.open","pid":60,"path":"/home/dev/.config/google-chrome/Default","access":"read"}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":11,"ts_ms":1762250001100,"t_rel_ms":1100,"source":"gvisor","kind":"file.open","pid":60,"path":"/seed/home/.config/google-chrome/Default","access":"read"}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":12,"ts_ms":1762250001200,"t_rel_ms":1200,"source":"gvisor","kind":"file.open","pid":60,"path":"/home/dev/Downloads/a","access":"create"}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":13,"ts_ms":1762250001300,"t_rel_ms":1300,"source":"gvisor","kind":"file.open","pid":60,"path":"/home/dev/Downloads/b","access":"create","ok":false,"errno":13}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":14,"ts_ms":1762250001400,"t_rel_ms":1400,"source":"orchestrator","kind":"exec.finished","exit_code":0,"timed_out":false}

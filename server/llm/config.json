@@ -1,13 +1,15 @@
 {
   "base_url": "https://api.vultrinference.com/v1",
   "seed": 7,
-  "prompt_version": "2026-11-04.2",
+  "prompt_version": "2026-11-05.2",
   "harness_languages": ["bash", "python3", "node"],
   "_evidence": "Chosen 2026-11-04 from the real prompts (scratchpad compare-models.mjs, 3 tries per model, benign inputs). glm-5.2/5.3/5.3-flash and minimax-m3.1-flash ignore reasoning:{enabled:false} on the harness prompt (reasoning_tokens == max_completion_tokens, empty content); mimo-v2.6-flash and qwen3.8-flash-next misbehave on the harness prompt in json_schema mode, so the harness call uses json_object. deepseek-v4.1-flash-1017 and qwen3.8-flash-next were valid 9/9 (contract), 3/3 (harness, json_object) and 3/3 (explanation) at 0.7-1.5 s median.",
+  "_review_evidence": "Measured 2026-11-05 as text only, nothing executed (scratchpad eval-sets.mjs): NL2Bash one-liners with their own descriptions as claims, and Atomic Red Team Linux tests with their default values filled in. Prompt changes looked at one fixed half of each set; these numbers are from the other half. Discovery tests (hostname, user lists) are counted apart. With reasoning on the main model: honest flagged 1/120 with a real description and 14/120 with no claim, attack raised 89/131 with no claim and 90/130 with a fixed cover story, median 2.5 s, 33 of 540 calls passed 13 s and went to the fallback, which answers without reasoning. Without reasoning: 1/120, 5/120, 70/131, 91/131, median 1.4 s. On the real service, 15/15 hidden-condition runs asked for and got the second run.",
   "calls": {
     "contract":    { "model": "deepseek-v4.1-flash-1017", "fallback_model": "qwen3.8-flash-next", "json_mode": "json_schema", "max_completion_tokens": 1024, "temperature": 0,   "timeout_ms": 20000, "retries": 1 },
     "harness":     { "model": "deepseek-v4.1-flash-1017", "fallback_model": "qwen3.8-flash-next", "json_mode": "json_object", "max_completion_tokens": 4096, "temperature": 0,   "timeout_ms": 30000, "retries": 0 },
     "explanation": { "model": "deepseek-v4.1-flash-1017", "fallback_model": "mimo-v2.6-flash",    "json_mode": "json_schema", "max_completion_tokens": 1500, "temperature": 0.3, "timeout_ms": 25000, "retries": 1 },
+    "review":      { "model": "deepseek-v4.1-flash-1017", "fallback_model": "qwen3.8-flash-next", "json_mode": "json_schema", "max_completion_tokens": 5000, "temperature": 0,   "timeout_ms": 13000, "retries": 1, "reasoning": true },
     "planner":     { "model": "deepseek-v4.1-flash-1017", "fallback_model": "qwen3.8-flash-next", "json_mode": "json_object", "max_completion_tokens": 2048, "temperature": 0,   "timeout_ms": 30000, "retries": 1, "stretch": true }
   }
 }

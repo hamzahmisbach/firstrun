@@ -101,6 +101,16 @@ test('happy path: json_schema request shape, data + meta, modelsUsed', async () 
   assert.deepEqual(llm.modelsUsed(), [{ role: 'thing', model: 'primary-model', calls: 1, ms: llm.modelsUsed()[0].ms, fallback: false }]);
 });
 
+test('a call can ask its main model to think; the fallback answers straight away', async () => {
+  const config = { ...CONFIG, calls: { ...CONFIG.calls, deep: { ...CONFIG.calls.thing, reasoning: true, retries: 0 } } };
+  const timedOut = Object.assign(new Error('timed out'), { name: 'TimeoutError' });
+  const { llm, calls } = llmWith([() => timedOut, reply('{"answer":"fb","n":3}')], { config });
+  const { data, meta } = await llm.callJson('deep', PROMPT, Shape);
+  assert.deepEqual(data, { answer: 'fb', n: 3 });
+  assert.equal(meta.fallback_model_used, true);
+  assert.deepEqual(calls.map((c) => [c.body.model, c.body.reasoning.enabled]), [['primary-model', true], ['fallback-model', false]]);
+});
+
 test('json_object mode and fenced answers', async () => {
   const { llm, calls } = llmWith([reply('```json\n{"answer":"ok","n":2}\n```')]);
   const { data } = await llm.callJson('plain', PROMPT, Shape);

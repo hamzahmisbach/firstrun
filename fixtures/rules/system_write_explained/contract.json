@@ -1,0 +1,10 @@
+{
+  "summary": "installs a helper into /usr/local/bin",
+  "expected_hosts": [],
+  "expected_write_paths": [
+    "/usr/local/**"
+  ],
+  "expected_processes": [],
+  "allowed_decoy_categories": [],
+  "notes": ""
+}

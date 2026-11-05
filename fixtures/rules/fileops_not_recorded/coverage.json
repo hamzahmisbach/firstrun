@@ -1,0 +1,18 @@
+{
+  "mode": "trace",
+  "gvisor_dropped": 0,
+  "decode_errors": 0,
+  "pre_t0": 3,
+  "dedup": 0,
+  "capped": {},
+  "scan_truncated": false,
+  "oom_killed": false,
+  "timed_out": false,
+  "tls_unreadable": [],
+  "fileops": {
+    "recorded": false,
+    "reason": "missing",
+    "lines": 0,
+    "malformed": 0
+  }
+}

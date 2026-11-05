@@ -1,0 +1,8 @@
+{
+  "level": "CLEAN",
+  "rule_ids": [],
+  "severity_counts": {},
+  "notes_include": [
+    "File deletions, renames and permission changes were not recorded for this run, so a command that removed or replaced files would not show it here."
+  ]
+}

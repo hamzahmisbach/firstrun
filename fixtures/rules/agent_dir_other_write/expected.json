@@ -1,0 +1,13 @@
+{
+  "level": "CLEAN",
+  "rule_ids": [],
+  "severity_counts": {
+    "low": 2
+  },
+  "rules_present": [
+    "fs.unexpected_write"
+  ],
+  "rules_absent": [
+    "fs.agent_hook_write"
+  ]
+}

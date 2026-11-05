@@ -2,16 +2,12 @@
   "runtimes": {
     "runsc": {
       "path": "/usr/bin/runsc",
-      "runtimeArgs": ["--platform=systrap", "--pod-init-config=/etc/firstrun/trace-session.json"]
-    },
-    "runsc-strace": {
-      "path": "/usr/bin/runsc",
       "runtimeArgs": [
         "--platform=systrap",
-        "--debug",
+        "--pod-init-config=/etc/firstrun/trace-session.json",
         "--debug-log=/var/log/firstrun/runsc/%ID%.%COMMAND%.log",
         "--strace",
-        "--strace-syscalls=execve,execveat,open,openat,creat,connect,clone,fork,vfork",
+        "--strace-syscalls=execve,unlink,unlinkat,rename,renameat,renameat2,rmdir,chmod,fchmod,fchmodat,truncate,ftruncate,symlink,symlinkat,link,linkat,mkdir,mkdirat,chdir,fchdir,clone,clone3,fork,vfork",
         "--strace-log-size=4096"
       ]
     },

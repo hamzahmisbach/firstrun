@@ -1,0 +1,10 @@
+{
+  "summary": "configures Claude Code for this project",
+  "expected_hosts": [],
+  "expected_write_paths": [
+    "~/.claude/**"
+  ],
+  "expected_processes": [],
+  "allowed_decoy_categories": [],
+  "notes": ""
+}

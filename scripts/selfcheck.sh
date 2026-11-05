@@ -12,6 +12,7 @@ set -uo pipefail
 WORK_BASE="${FIRSTRUN_RUNS_DIR:-/srv/firstrun/runs}/_selfcheck"
 SOCK="${FIRSTRUN_SINK_SOCKET:-/run/firstrun/gvisor-sink.sock}"
 TRACE_DIR="${FIRSTRUN_TRACE_DIR:-/srv/firstrun/trace}"
+RUNSC_LOG_DIR="${FIRSTRUN_RUNSC_LOG_DIR:-/var/log/firstrun/runsc}"
 QUICK=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -51,8 +52,11 @@ WORK="$WORK_BASE/$ID"
 cleanup() {
   docker rm -f "${NET}-sink" >/dev/null 2>&1 || true
   docker network rm "$NET" >/dev/null 2>&1 || true
-  # The probe container's trace file would otherwise sit in the trace dir until the janitor's sweep.
-  if [[ -s "$WORK/cid" ]]; then cid="$(cat "$WORK/cid")"; [[ "$cid" =~ ^[0-9a-f]{64}$ ]] && rm -f "$TRACE_DIR/$cid.jsonl"; fi
+  # The probe container's trace file and runsc logs would otherwise sit there until the janitor's sweep.
+  if [[ -s "$WORK/cid" ]]; then
+    cid="$(cat "$WORK/cid")"
+    if [[ "$cid" =~ ^[0-9a-f]{64}$ ]]; then rm -f "$TRACE_DIR/$cid.jsonl" "$RUNSC_LOG_DIR/$cid".*.log; fi
+  fi
   rm -rf "$WORK"
 }
 trap cleanup EXIT

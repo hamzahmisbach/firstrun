@@ -1,0 +1,13 @@
+{
+  "level": "CLEAN",
+  "rule_ids": [],
+  "severity_counts": {
+    "low": 1
+  },
+  "rules_present": [
+    "fs.unexpected_write"
+  ],
+  "rules_absent": [
+    "fs.existing_file_changed"
+  ]
+}

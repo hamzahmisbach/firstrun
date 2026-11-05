@@ -1,0 +1,10 @@
+{
+  "level": "SUSPICIOUS",
+  "rule_ids": [
+    "fs.existing_file_changed"
+  ],
+  "severity_counts": {
+    "medium": 1,
+    "low": 1
+  }
+}

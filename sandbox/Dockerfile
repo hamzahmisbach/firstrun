@@ -24,11 +24,12 @@ RUN update-ca-certificates
 RUN (userdel -r ubuntu 2>/dev/null || true) && useradd -u 1000 -s /bin/bash -M -d /home/dev dev
 
 COPY shims/ /opt/firstrun/shims/
+COPY fast/ /opt/firstrun/fast/
 COPY entry.sh launch /opt/firstrun/
 RUN cd /opt/firstrun/shims \
  && while read -r name; do [ -z "$name" ] || ln -sf _shim "$name"; done < names.txt \
  && rm names.txt \
- && chmod 0755 /opt/firstrun/shims/_shim /opt/firstrun/entry.sh /opt/firstrun/launch
+ && chmod 0755 /opt/firstrun/shims/_shim /opt/firstrun/entry.sh /opt/firstrun/launch /opt/firstrun/fast/sleep
 
 WORKDIR /home/dev
 USER 1000:1000

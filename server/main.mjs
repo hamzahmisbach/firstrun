@@ -122,7 +122,7 @@ async function selfTest() {
     return fail('docker unreachable', { err: err?.message ?? String(err) });
   }
   const r = await docker.runScript(SELFCHECK, ['--work-dir', `${config.runsDir}/_selfcheck`, '--sink-socket', config.sinkSocket], {
-    env: { FIRSTRUN_RUNS_DIR: config.runsDir, FIRSTRUN_SINK_SOCKET: config.sinkSocket, FIRSTRUN_TRACE_DIR: config.traceDir },
+    env: { FIRSTRUN_RUNS_DIR: config.runsDir, FIRSTRUN_SINK_SOCKET: config.sinkSocket, FIRSTRUN_TRACE_DIR: config.traceDir, FIRSTRUN_RUNSC_LOG_DIR: config.runscLogDir },
   });
   const lines = `${r.stdout}\n${r.stderr}`.split('\n').map((l) => l.trim()).filter(Boolean);
   if (!r.ok) return fail('selfcheck.sh failed', { code: r.code, lines: lines.slice(-20) });

@@ -1,0 +1,11 @@
+{
+  "summary": "reads instance metadata to configure the agent",
+  "expected_hosts": [
+    "metadata.azure.com",
+    "169.254.169.254"
+  ],
+  "expected_write_paths": [],
+  "expected_processes": [],
+  "allowed_decoy_categories": [],
+  "notes": ""
+}

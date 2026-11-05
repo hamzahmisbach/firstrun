@@ -26,6 +26,9 @@ export const DECOY_TABLE = Object.freeze(
     { id: 'aws_config', path: '.aws/config', category: 'cloud_credentials', token: true },
     { id: 'gcloud_adc', path: '.config/gcloud/application_default_credentials.json', category: 'cloud_credentials', token: true },
     { id: 'kube_config', path: '.kube/config', category: 'cloud_credentials', token: true },
+    { id: 'vault_token', path: '.vault-token', category: 'cloud_credentials', token: true },
+    { id: 'azure_msal', path: '.azure/msal_token_cache.json', category: 'cloud_credentials', token: true },
+    { id: 'aliyun_config', path: '.aliyun/config.json', category: 'cloud_credentials', token: true },
     { id: 'npmrc', path: '.npmrc', category: 'package_manager_token', token: true },
     { id: 'gh_hosts', path: '.config/gh/hosts.yml', category: 'vcs_token', token: true },
     { id: 'git_credentials', path: '.git-credentials', category: 'vcs_token', token: true },
@@ -43,10 +46,14 @@ export const DECOY_TABLE = Object.freeze(
     { id: 'claude_credentials', path: '.claude/.credentials.json', category: 'ai_assistant_config', token: true },
     { id: 'claude_json', path: '.claude.json', category: 'ai_assistant_config', token: true },
     { id: 'gemini_oauth', path: '.gemini/oauth_creds.json', category: 'ai_assistant_config', token: true },
+    { id: 'codex_auth', path: '.codex/auth.json', category: 'ai_assistant_config', token: true },
+    { id: 'cursor_mcp', path: '.cursor/mcp.json', category: 'ai_assistant_config', token: true },
     { id: 'project_env', path: 'projects/acme-app/.env', category: 'project_secrets', token: true },
     { id: 'bash_history', path: '.bash_history', category: 'history', token: false },
     { id: 'zsh_history', path: '.zsh_history', category: 'history', token: false },
     { id: 'pw', path: null, category: 'phished_input', token: true },
+    // Handed to the command as an environment variable on a second try (review/knobs.mjs).
+    { id: 'env_secret', path: null, category: 'project_secrets', token: true },
   ].map(Object.freeze),
 );
 

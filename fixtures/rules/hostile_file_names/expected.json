@@ -1,0 +1,13 @@
+{
+  "level": "SUSPICIOUS",
+  "rule_ids": [
+    "fs.existing_file_changed"
+  ],
+  "severity_counts": {
+    "medium": 1
+  },
+  "findings_count": 1,
+  "notes_include": [
+    "1 recorded file change had a name that could not be fully read (it contained a line break); the folder it pointed at is reported instead."
+  ]
+}

@@ -61,6 +61,20 @@ export function summarizeEvent(ev, { decoyPathById = new Map(), bySeq = new Map(
       const verb = ev.access === 'read' ? 'read' : ev.access === 'create' ? 'created' : 'wrote';
       return `${verb} ${displayPath(ev.path)}${ev.ok === false ? ' (failed)' : ''}`;
     }
+    case 'file.delete':
+      return `deleted ${displayPath(ev.path)}${ev.ok === false ? ' (failed)' : ''}`;
+    case 'file.rename':
+      return `moved ${displayPath(ev.from)}${typeof ev.to === 'string' ? ` to ${displayPath(ev.to)}` : ' away'}${ev.ok === false ? ' (failed)' : ''}`;
+    case 'file.chmod':
+      return `changed permissions of ${displayPath(ev.path)}${ev.ok === false ? ' (failed)' : ''}`;
+    case 'file.truncate':
+      return `emptied ${displayPath(ev.path)}${ev.ok === false ? ' (failed)' : ''}`;
+    case 'file.link':
+      return `made a ${ev.link === 'symlink' ? 'symbolic link' : 'hard link'} to ${displayPath(ev.from)}${ev.ok === false ? ' (failed)' : ''}`;
+    case 'dir.remove':
+      return `removed folder ${displayPath(ev.path)}${ev.ok === false ? ' (failed)' : ''}`;
+    case 'dir.create':
+      return `created folder ${displayPath(ev.path)}`;
     case 'http.request':
       return `${String(ev.method ?? '').toUpperCase() || 'request'} to ${normalizeHost(ev.host) || 'unknown host'}${ev.body_len > 0 ? ` with ${ev.body_len} bytes` : ''}`;
     case 'tls.clienthello':
@@ -100,7 +114,7 @@ export function summarizeEvent(ev, { decoyPathById = new Map(), bySeq = new Map(
  * @param {object[]} [args.events] lets `evidence_summary` name hosts/paths/bytes; optional
  * @param {object[]} [args.decoys] only `id` and `path` are read (for "canary from ~/x")
  */
-export function buildExplanationInput({ input, verdict, findings, layers, contract, coverage, events, decoys }) {
+export function buildExplanationInput({ input, verdict, findings, layers, contract, coverage, events, decoys, review, attempts }) {
   const bySeq = new Map((Array.isArray(events) ? events : []).filter((e) => e && Number.isInteger(e.seq)).map((e) => [e.seq, e]));
   const decoyPathById = new Map(
     (Array.isArray(decoys) ? decoys : [])
@@ -159,5 +173,14 @@ export function buildExplanationInput({ input, verdict, findings, layers, contra
     findings: projectedFindings,
     layers: projectedLayers,
     coverage_notes: coverageNotes.map((n) => cut(n, 400)),
+    ai_review:
+      review && typeof review === 'object'
+        ? {
+            risk: String(review.risk ?? 'none'),
+            summary: cut(String(review.summary ?? ''), 300),
+            real_machine_effects: strList(review.real_machine_effects).map((s) => cut(s, 200)).slice(0, 6),
+          }
+        : null,
+    ran_twice: Array.isArray(attempts) && attempts.length > 1 && attempts[1]?.failed !== true,
   };
 }

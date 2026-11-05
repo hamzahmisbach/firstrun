@@ -1,0 +1,4 @@
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":1,"ts_ms":1762250000100,"t_rel_ms":100,"source":"sinkhole","kind":"dns.query","name":"metadata.azure.com","qtype":"A","ts_src":"arrival"}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":2,"ts_ms":1762250000200,"t_rel_ms":200,"source":"sinkhole","kind":"tls.clienthello","sni":"metadata.azure.com","port":443,"alpn":["h2","http/1.1"]}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":3,"ts_ms":1762250000300,"t_rel_ms":300,"source":"gvisor","kind":"net.connect","pid":60,"family":"inet","dst_ip":"169.254.169.254","dst_port":80}
+{"run_id":"3M7Q2KX9V4B8NR6TZC5JH1WDYE","seq":4,"ts_ms":1762250000400,"t_rel_ms":400,"source":"orchestrator","kind":"exec.finished","exit_code":0,"timed_out":false}

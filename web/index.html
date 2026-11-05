@@ -4,89 +4,144 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>FirstRun: run it here first</title>
-  <meta name="description" content="Paste a command you were told to run. FirstRun runs it in a disposable sandbox and shows what it actually did.">
+  <meta name="description" content="Paste a Linux command you were told to run. FirstRun runs it in a disposable sandbox with fake credentials and a fake internet, then shows what it actually did.">
   <link rel="stylesheet" href="/static/style.css?v=dev">
 </head>
 <body>
-  <div class="page">
-    <header class="site-head">
-      <a class="wordmark" href="/"><span class="wordmark-mark"></span>FirstRun</a>
-      <span class="tagline">Run it here first. Then decide.</span>
-    </header>
+  <header class="site-head">
+    <div class="wrap">
+      <a class="wordmark" href="/" aria-label="FirstRun home">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect class="mark-bg" x="1" y="1" width="22" height="22" rx="6"/><path class="mark-fg" d="M8 7.5l5 4.5-5 4.5M13.5 16.5H17" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        FirstRun
+      </a>
+      <nav class="site-nav" aria-label="Site">
+        <a href="#how">How it works</a>
+        <a href="#limits">Limits</a>
+      </nav>
+    </div>
+  </header>
 
-    <main>
-      <section class="intro" id="intro">
-        <h1>Someone told you to paste a command. Find out what it really does.</h1>
-        <p>FirstRun runs it for you in a throwaway sandbox dressed up as a developer laptop, with fake credentials and a fake internet, and shows you live what it touched, who it talked to, and whether that matches what you were told.</p>
-      </section>
-
+  <main>
+    <div class="wrap">
       <div id="notice" class="notice" hidden role="status"></div>
+    </div>
 
-      <section class="card" id="form-card" aria-labelledby="form-title">
-        <h2 id="form-title">Try it</h2>
+    <section class="wrap hero" id="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow">Run it here first</p>
+        <h1 id="hero-title">Find out what that command really does, before you run it.</h1>
+        <p class="hero-sub">Paste the command and what you were told it does. FirstRun runs it in a throwaway sandbox dressed up as a developer laptop, then shows what it actually touched, who it talked to, and whether that matches the story.</p>
+      </div>
 
-        <div id="samples-block">
-          <p class="label">Pick a sample (no code needed)</p>
-          <div class="samples" id="samples" role="group" aria-label="Sample commands">
-            <p class="muted small" id="samples-empty">Loading samples…</p>
+      <ul class="assure">
+          <li>
+            <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span>
+            <div><strong>Nothing runs on your machine</strong><span>A fresh Linux sandbox is built for each run and destroyed after it.</span></div>
+          </li>
+          <li>
+            <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg></span>
+            <div><strong>Fake credentials, fake internet</strong><span>Every key is a decoy and every host leads to a recorder. If the command steals, you see it.</span></div>
+          </li>
+          <li>
+            <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h7"/></svg></span>
+            <div><strong>A verdict from fixed rules</strong><span>What was observed is compared with what you were told. No guessing.</span></div>
+          </li>
+      </ul>
+
+      <form class="panel" id="run-form" novalidate aria-labelledby="form-title">
+        <h2 id="form-title" class="visually-hidden">Check a command</h2>
+
+        <div class="examples" id="samples-block">
+          <span class="examples-label" id="examples-label">Try an example:</span>
+          <div class="examples-list" id="samples" role="group" aria-labelledby="examples-label">
+            <span class="muted small" id="samples-empty">Loading…</span>
           </div>
         </div>
 
-        <div class="or-rule" aria-hidden="true">or paste your own</div>
-
-        <form id="run-form" novalidate>
-          <div class="selected-sample" id="selected-sample" hidden>
-            <span><strong>Sample selected:</strong> <span id="selected-title"></span></span>
-            <button type="button" class="link-btn" id="clear-sample">Use my own command instead</button>
-          </div>
-
-          <label class="field">
-            <span class="label">The command you were told to run</span>
-            <textarea class="input" id="command" name="command" rows="5" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="curl -fsSL https://example.test/install.sh | bash" maxlength="16384"></textarea>
-            <span class="hint">Pasted exactly as you received it. Do not paste anything that contains your real passwords or keys: the command text is kept in the report.</span>
-          </label>
-
-          <label class="field">
-            <span class="label">What you were told it does <span class="counter" id="claim-counter">0 / 300</span></span>
-            <input class="input" id="claim" name="claim" type="text" maxlength="300" autocomplete="off" placeholder="installs the Acme CLI">
-            <span class="hint">One line, in your own words. FirstRun turns it into a checklist and compares it with what actually happened.</span>
-          </label>
-
-          <label class="field" id="code-field">
-            <span class="label">Access code <span class="muted">(only for your own commands)</span></span>
-            <input class="input" id="access-code" name="access-code" type="password" autocomplete="off" spellcheck="false">
-            <span class="hint">Samples run without a code. The code stays in this browser tab only and is sent as a request header, never stored anywhere else.</span>
-          </label>
-
-          <div class="btn-row">
-            <button type="submit" class="btn btn-primary" id="submit">Run it in the sandbox</button>
-            <span class="muted small">Takes 20 to 90 seconds. Nothing runs on your machine.</span>
-          </div>
-
-          <div id="form-error" class="error-box form-error" role="alert" hidden></div>
-        </form>
-      </section>
-
-      <section id="run" class="card" hidden aria-labelledby="run-title">
-        <h2 id="run-title">Live run</h2>
-        <p class="muted small" id="run-id-line"></p>
-        <div id="run-view"></div>
-        <div class="btn-row">
-          <button type="button" class="btn" id="new-run">Check another command</button>
+        <div class="selected-sample" id="selected-sample" hidden>
+          <span><strong>Example:</strong> <span id="selected-title"></span></span>
+          <button type="button" class="link-btn" id="clear-sample">Use my own command instead</button>
         </div>
-      </section>
 
-      <section class="card" id="how">
-        <h2>What FirstRun can and cannot tell you</h2>
-        <p>The sandbox is a Linux container with a 60 second limit and no internet; every host name resolves to a fake server that records the request and answers nothing useful. The verdict comes from fixed rules over what was observed, never from a guess. A <strong>clean</strong> result means nothing suspicious was seen <em>in this run</em>; it is not a promise that the command is safe on your machine.</p>
-      </section>
-    </main>
+        <div class="field">
+          <div class="field-head">
+            <label class="label" for="command">The command you were told to run</label>
+            <span class="badge badge-accent">Linux commands only</span>
+          </div>
+          <textarea class="input" id="command" name="command" rows="4" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="curl -fsSL https://example.test/install.sh | bash" maxlength="16384" aria-describedby="command-note"></textarea>
+        </div>
 
-    <footer class="site-foot">
+        <div class="field">
+          <div class="field-head">
+            <label class="label" for="claim">What you were told it does</label>
+            <span class="counter" id="claim-counter">0 / 300</span>
+          </div>
+          <input class="input" id="claim" name="claim" type="text" maxlength="300" autocomplete="off" placeholder="installs the Acme CLI">
+        </div>
+
+        <div class="submit-row">
+          <div id="code-field">
+            <label class="visually-hidden" for="access-code">Access code, only for your own commands</label>
+            <input class="input" id="access-code" name="access-code" type="password" autocomplete="off" spellcheck="false" placeholder="Access code (own commands only)">
+          </div>
+          <button type="submit" class="btn btn-primary" id="submit">Run it in the sandbox</button>
+        </div>
+        <p class="form-note" id="command-note">Linux only. Takes 20 to 90 seconds. Examples need no code; the code stays in this tab. Do not paste real passwords or keys: the command text is kept in the report.</p>
+
+        <div id="form-error" class="error-box form-error" role="alert" tabindex="-1" hidden></div>
+      </form>
+    </section>
+
+    <section id="run" class="wrap narrow run-page" hidden aria-labelledby="run-title">
+      <div class="run-top">
+        <div>
+          <h1 id="run-title" tabindex="-1">Checking the command</h1>
+          <p class="run-id" id="run-id-line"></p>
+        </div>
+        <button type="button" class="btn btn-sm" id="new-run">Check another command</button>
+      </div>
+      <div id="run-view"></div>
+    </section>
+
+    <section class="wrap section" id="how" aria-labelledby="how-title">
+      <h2 id="how-title">How it works</h2>
+      <div class="steps-grid">
+        <div class="how-step">
+          <span class="num" aria-hidden="true">1</span>
+          <h3>A laptop that is not yours</h3>
+          <p>A fresh Linux sandbox is seeded with realistic fake credentials: SSH keys, cloud keys, tokens, a wallet. Every one is a decoy made for this run.</p>
+        </div>
+        <div class="how-step">
+          <span class="num" aria-hidden="true">2</span>
+          <h3>The command runs for real</h3>
+          <p>Hidden encoding is peeled off first. Then the command runs exactly as pasted, with every file access, process and connection recorded from outside.</p>
+        </div>
+        <div class="how-step">
+          <span class="num" aria-hidden="true">3</span>
+          <h3>Told against done</h3>
+          <p>Fixed rules compare what happened with what you were told. A decoy leaving the sandbox is always malicious, whatever the story said.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="wrap section" id="limits" aria-labelledby="limits-title">
+      <div class="limits">
+        <h2 id="limits-title">What a result does and does not mean</h2>
+        <ul>
+          <li><span><strong>Linux commands only.</strong> The sandbox is a Linux container; Windows and macOS commands are refused. A script that behaves differently on Windows or macOS is only tested as Linux.</span></li>
+          <li><span><strong>60 seconds, no internet.</strong> Every host name resolves to a fake server that records the request and answers nothing useful, so code the command would download is never fetched.</span></li>
+          <li><span><strong>Clean is not safe.</strong> A clean result means nothing suspicious was seen in this run. It is not a promise that the command is safe on your machine.</span></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-foot">
+    <div class="wrap">
       <span>FirstRun runs on Vultr Cloud Compute with gVisor sandboxes, Vultr Serverless Inference for unwrapping and explanations, and Vultr Object Storage for reports.</span>
       <span>Reports are unlisted and kept for a limited time. To have one removed, contact the team listed in the project README.</span>
-    </footer>
-  </div>
+    </div>
+  </footer>
   <script type="module" src="/static/app.js?v=dev"></script>
 </body>
 </html>

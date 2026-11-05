@@ -2,11 +2,14 @@
 // framework filtering, shim.call, decoy_id mapping, loader-noise filter, dedup, caps. Pure state
 // machine, no I/O; evidence/index.mjs feeds it from the tails.
 import path from 'node:path';
-import { EVIDENCE_LIMITS, SINKHOLE_KINDS, emptyCoverage, safeValidateEvent } from './schema.mjs';
+import { EVIDENCE_LIMITS, FILEOP_KINDS, SINKHOLE_KINDS, emptyCoverage, safeValidateEvent } from './schema.mjs';
 
 const O_ACCMODE = 0o3;
 const O_CREAT = 0o100;
 const AT_FDCWD = -100;
+const AT_FDCWD_U32 = 0xffffff9c; // how strace prints AT_FDCWD in a plain hex argument
+const AT_REMOVEDIR = 0x200;
+const MAX_SYMLINKS = 500;
 const AF_UNIX = 1;
 const AF_INET = 2;
 const AF_INET6 = 10;
@@ -14,6 +17,7 @@ const HOME = '/home/dev';
 const SEED_HOME = '/seed/home';
 const SHIM_CANARIES = '/seed/shim-canaries.json';
 const CMD_SH = '/work/cmd.sh';
+const ANSWERS_FILE = '/work/answers.txt'; // stdin of a second try, opened by launch itself (8.7)
 
 /** Successful reads under these prefixes are loader/runtime noise (7.3). */
 export const NOISE_READ_PREFIXES = Object.freeze([
@@ -138,14 +142,21 @@ export function createNormalizer({ runId, decoys = [], onEvent, log = () => {}, 
   const counts = new Map();
   const seenOpen = new Set();
   const seenConnect = new Set();
+  const seenFileop = new Set();
   const shimPids = new Set();
   const pendingSinkhole = [];
+  // 7.6: cwd per thread group (from execve context, AT_FDCWD arguments, chdir/fchdir and clone
+  // inheritance) and the symlinks the run created, so a path through one of them still names the
+  // real file.
+  const cwdByPid = new Map();
+  const symlinks = new Map();
   let seq = 0;
   let t0Ns = null;
   let t0Ms = null;
   let pidT0 = null;
   let pidRoot = null;
   let lastDropped = 0;
+  let fileopsT0 = false;
 
   function capFor(kind) {
     if (kind === 'canary.hit' || kind === 'exec.finished') return Infinity;
@@ -158,7 +169,7 @@ export function createNormalizer({ runId, decoys = [], onEvent, log = () => {}, 
       coverage.capped[kind] = (coverage.capped[kind] ?? 0) + 1;
       return true;
     }
-    if (capFor(kind) !== Infinity && seq >= caps.total) {
+    if (capFor(kind) !== Infinity && !FILEOP_KINDS.includes(kind) && seq >= caps.total) {
       coverage.capped.total = (coverage.capped.total ?? 0) + 1;
       return true;
     }
@@ -219,6 +230,7 @@ export function createNormalizer({ runId, decoys = [], onEvent, log = () => {}, 
     const binaryPath = typeof msg.binary_path === 'string' ? msg.binary_path : null;
     const pid = Number(ctx.thread_group_id ?? 0);
     const ppid = Number(ctx.parent_thread_group_id ?? 0);
+    if (typeof ctx.cwd === 'string' && ctx.cwd.startsWith('/')) cwdByPid.set(pid, ctx.cwd);
 
     if (t0Ns === null) {
       if (execfn === limits.t0Marker || argv[0] === limits.t0Marker) {
@@ -266,7 +278,7 @@ export function createNormalizer({ runId, decoys = [], onEvent, log = () => {}, 
     const fd = Number(msg.fd ?? 0);
     const cwd = ctx.cwd || '/';
     const base = fd === AT_FDCWD ? cwd : (msg.fd_path || cwd);
-    const abs = absolutize(msg.pathname, base);
+    const abs = throughSymlinks(absolutize(msg.pathname, base));
     if (!abs) {
       coverage.ignored += 1;
       return null;
@@ -283,6 +295,10 @@ export function createNormalizer({ runId, decoys = [], onEvent, log = () => {}, 
       return null;
     }
     if (pid === pidRoot && (abs === CMD_SH || abs === '/dev/null')) {
+      coverage.framework += 1;
+      return null;
+    }
+    if (pid === pidT0 && abs === ANSWERS_FILE) {
       coverage.framework += 1;
       return null;
     }
@@ -335,6 +351,217 @@ export function createNormalizer({ runId, decoys = [], onEvent, log = () => {}, 
     const event = { source: 'gvisor', kind: 'net.connect', pid, family: addr.family, dst_ip: addr.dst_ip, dst_port: addr.dst_port };
     if (addr.family === 'unix') event.path = addr.path;
     return emit(event, tsMs);
+  }
+
+  /** Rewrite the prefix of `abs` that is a symlink this run created, so the target is named. */
+  function throughSymlinks(abs) {
+    if (!abs || symlinks.size === 0) return abs;
+    let out = abs;
+    for (let hop = 0; hop < 8; hop++) {
+      let hit = null;
+      for (const [link, target] of symlinks) {
+        if (out === link || out.startsWith(`${link}/`)) {
+          if (!hit || link.length > hit.length) hit = link;
+        }
+      }
+      if (!hit) break;
+      out = path.posix.normalize(symlinks.get(hit) + out.slice(hit.length));
+    }
+    return out;
+  }
+
+  /**
+   * Absolute form of a strace path argument. `dir` is the fd argument it is relative to (null for
+   * the plain syscalls, whose line shows no cwd); then the pid's known cwd; then HOME, the
+   * directory every sandbox process starts in, flagged in `flags.cwd_assumed`.
+   */
+  function resolveFileopPath(pid, dir, p, flags) {
+    if (typeof p !== 'string') return null;
+    if (p.startsWith('/')) return throughSymlinks(path.posix.normalize(p));
+    let base = null;
+    if (dir && typeof dir.path === 'string' && dir.path.startsWith('/')) {
+      base = dir.path;
+      if (dir.fd === AT_FDCWD_U32) cwdByPid.set(pid, dir.path);
+    } else if (dir && dir.path === null) {
+      return null; // a bad fd: the call failed and names nothing
+    } else if (cwdByPid.has(pid)) {
+      base = cwdByPid.get(pid);
+    } else {
+      base = HOME;
+      flags.cwd_assumed = true;
+    }
+    return throughSymlinks(absolutize(p, base));
+  }
+
+  /** A hex argument that stands for a dirfd (renameat2/linkat second dirfd): only AT_FDCWD is resolvable. */
+  function hexDir(pid, arg) {
+    if (arg?.value === AT_FDCWD_U32) return { fd: AT_FDCWD_U32, path: cwdByPid.get(pid) ?? null };
+    return { fd: arg?.value ?? null, path: null };
+  }
+
+  /**
+   * One parsed record from the runsc strace log (fileops-reader). The T0 gate is this stream's
+   * own launch execve, so entry.sh's cp/chmod setup never appears. Returns the event or null.
+   */
+  function fileop(record) {
+    if (!record || typeof record !== 'object') return null;
+    const pid = Number(record.pid ?? 0);
+    const tsMs = Number(record.ts_ms ?? Date.now());
+    const first = record.readings?.[0] ?? [];
+    if (record.syscall === 'execve') {
+      if (!fileopsT0 && first[0]?.path === limits.t0Marker && record.ok) fileopsT0 = true;
+      coverage[fileopsT0 ? 'framework' : 'pre_t0'] += 1;
+      return null;
+    }
+    if (!fileopsT0) {
+      coverage.pre_t0 += 1;
+      return null;
+    }
+    const sc = record.syscall;
+    if (sc === 'clone' || sc === 'clone3' || sc === 'fork' || sc === 'vfork') {
+      if (record.ok && record.ret > 0 && cwdByPid.has(pid)) cwdByPid.set(record.ret, cwdByPid.get(pid));
+      return null;
+    }
+    if (record.malformed) {
+      // A name with a line break cut the record; what was readable still says where it pointed.
+      const flags = {};
+      const dir = record.partial?.dir ? { fd: AT_FDCWD_U32, path: record.partial.dir } : null;
+      // An empty head (the break came right after the pointer) still names the directory.
+      const abs = resolveFileopPath(pid, dir, record.partial?.path || '.', flags);
+      if (!abs) {
+        coverage.ignored += 1;
+        return null;
+      }
+      const kind = sc === 'rmdir' ? 'dir.remove' : sc === 'mkdir' || sc === 'mkdirat' ? 'dir.create' : sc === 'chmod' || sc === 'fchmodat' || sc === 'fchmod' ? 'file.chmod' : sc === 'truncate' || sc === 'ftruncate' ? 'file.truncate' : sc === 'unlink' || sc === 'unlinkat' ? 'file.delete' : sc.startsWith('rename') ? 'file.rename' : sc === 'chdir' || sc === 'fchdir' ? null : 'file.link';
+      if (!kind) return null;
+      const event = { source: 'gvisor', kind, pid, ok: true, partial: true, ...flags };
+      if (kind === 'file.rename' || kind === 'file.link') event.from = abs;
+      else event.path = abs;
+      if (kind === 'file.link') event.link = sc.startsWith('sym') ? 'symlink' : 'hard';
+      return emit(withDecoys(event), tsMs);
+    }
+    if (sc === 'chdir') {
+      const abs = resolveFileopPath(pid, null, first[0]?.path, {});
+      if (record.ok && abs) cwdByPid.set(pid, abs);
+      return null;
+    }
+    if (sc === 'fchdir') {
+      if (record.ok && first[0]?.path) cwdByPid.set(pid, first[0].path);
+      return null;
+    }
+
+    // Every reading of the record is resolved; the first is the event, the others are alt_paths.
+    const flags = {};
+    const resolved = record.readings.map((args) => resolveReading(pid, sc, args, flags));
+    const main = resolved.find(Boolean);
+    if (!main) {
+      coverage.ignored += 1;
+      return null;
+    }
+    if (!record.ok && main.kind === 'dir.create') {
+      coverage.noise += 1; // mkdir -p probes every parent and gets EEXIST
+      return null;
+    }
+    const event = { source: 'gvisor', kind: main.kind, pid, ok: Boolean(record.ok), ...main.fields, ...flags };
+    if (!record.ok && record.errno !== undefined) event.errno = record.errno;
+    const alt = new Set();
+    for (const r of resolved) {
+      if (!r || r === main) continue;
+      for (const p of [r.fields.path, r.fields.from, r.fields.to]) if (p && p !== main.fields.path && p !== main.fields.from && p !== main.fields.to) alt.add(p);
+    }
+    if (alt.size) event.alt_paths = [...alt].slice(0, 16);
+    if (main.kind === 'file.chmod' || main.kind === 'dir.create') {
+      const key = `${main.kind}\0${pid}\0${event.path}\0${event.mode}\0${event.ok}`;
+      if (seenFileop.has(key)) {
+        coverage.dedup += 1;
+        return null;
+      }
+      seenFileop.add(key);
+    }
+    if (event.ok && main.kind === 'file.link' && event.link === 'symlink' && event.to && event.from && symlinks.size < MAX_SYMLINKS) {
+      symlinks.set(event.to, event.from);
+    }
+    return emit(withDecoys(event), tsMs);
+  }
+
+  function withDecoys(event) {
+    const from = event.path ?? event.from;
+    const id = decoyByPath.get(from);
+    if (id) event.decoy_id = id;
+    const toId = event.to ? decoyByPath.get(event.to) : null;
+    if (toId) event.to_decoy_id = toId;
+    return event;
+  }
+
+  /** Map one reading (typed args) of a syscall to `{kind, fields}` with absolute paths, or null. */
+  function resolveReading(pid, sc, args, flags) {
+    const a = (i) => args[i] ?? {};
+    switch (sc) {
+      case 'unlink':
+      case 'rmdir': {
+        const p = resolveFileopPath(pid, null, a(0).path, flags);
+        return p ? { kind: sc === 'rmdir' ? 'dir.remove' : 'file.delete', fields: { path: p } } : null;
+      }
+      case 'unlinkat': {
+        const p = resolveFileopPath(pid, a(0), a(1).path, flags);
+        return p ? { kind: a(2).value & AT_REMOVEDIR ? 'dir.remove' : 'file.delete', fields: { path: p } } : null;
+      }
+      case 'mkdir':
+      case 'chmod':
+      case 'truncate': {
+        const p = resolveFileopPath(pid, null, a(0).path, flags);
+        if (!p) return null;
+        if (sc === 'truncate') return { kind: 'file.truncate', fields: { path: p } };
+        return { kind: sc === 'mkdir' ? 'dir.create' : 'file.chmod', fields: { path: p, mode: a(1).value } };
+      }
+      case 'mkdirat':
+      case 'fchmodat': {
+        const p = resolveFileopPath(pid, a(0), a(1).path, flags);
+        return p ? { kind: sc === 'mkdirat' ? 'dir.create' : 'file.chmod', fields: { path: p, mode: a(2).value } } : null;
+      }
+      case 'fchmod':
+      case 'ftruncate': {
+        const p = a(0).path;
+        if (typeof p !== 'string' || !p.startsWith('/')) return null;
+        return sc === 'fchmod' ? { kind: 'file.chmod', fields: { path: throughSymlinks(p), mode: a(1).value } } : { kind: 'file.truncate', fields: { path: throughSymlinks(p) } };
+      }
+      case 'rename':
+      case 'link': {
+        const from = resolveFileopPath(pid, null, a(0).path, flags);
+        const to = resolveFileopPath(pid, null, a(1).path, flags);
+        if (!from) return null;
+        const fields = { from };
+        if (to) fields.to = to;
+        if (sc === 'link') fields.link = 'hard';
+        return { kind: sc === 'rename' ? 'file.rename' : 'file.link', fields };
+      }
+      case 'renameat':
+      case 'renameat2':
+      case 'linkat': {
+        const from = resolveFileopPath(pid, a(0), a(1).path, flags);
+        const toDir = sc === 'renameat' ? a(2) : hexDir(pid, a(2));
+        const to = resolveFileopPath(pid, toDir, a(3).path, flags);
+        if (!from) return null;
+        const fields = { from };
+        if (to) fields.to = to;
+        if (sc === 'linkat') fields.link = 'hard';
+        return { kind: sc === 'linkat' ? 'file.link' : 'file.rename', fields };
+      }
+      case 'symlink':
+      case 'symlinkat': {
+        // The target is stored verbatim and resolved relative to the link's own directory.
+        const to = sc === 'symlink' ? resolveFileopPath(pid, null, a(1).path, flags) : resolveFileopPath(pid, a(1), a(2).path, flags);
+        const target = a(0).path;
+        if (typeof target !== 'string') return null;
+        const from = target.startsWith('/') ? throughSymlinks(path.posix.normalize(target)) : to ? throughSymlinks(absolutize(target, path.posix.dirname(to))) : null;
+        if (!from) return null;
+        const fields = { from, link: 'symlink' };
+        if (to) fields.to = to;
+        return { kind: 'file.link', fields };
+      }
+      default:
+        return null;
+    }
   }
 
   /** One raw line from the sidecar file. Returns the emitted event or null. */
@@ -452,10 +679,12 @@ export function createNormalizer({ runId, decoys = [], onEvent, log = () => {}, 
 
   return {
     gvisor,
+    fileop,
     sinkhole,
     orchestrator,
     finish,
     t0: () => t0Ms,
+    fileopsT0: () => fileopsT0,
     pidRoot: () => pidRoot,
     pidT0: () => pidT0,
     events: () => events,

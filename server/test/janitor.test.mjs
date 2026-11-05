@@ -47,15 +47,33 @@ test('sweep: removes stale containers/networks, keeps active and young ones, cle
   };
   const dir = mkdtempSync(path.join(tmpdir(), 'firstrun-janitor-'));
   try {
-    const config = loadConfig({ FIRSTRUN_RUNS_DIR: path.join(dir, 'runs'), FIRSTRUN_TRACE_DIR: path.join(dir, 'trace'), FIRSTRUN_SPOOL_DIR: path.join(dir, 'spool') });
+    const config = loadConfig({
+      FIRSTRUN_RUNS_DIR: path.join(dir, 'runs'),
+      FIRSTRUN_TRACE_DIR: path.join(dir, 'trace'),
+      FIRSTRUN_SPOOL_DIR: path.join(dir, 'spool'),
+      FIRSTRUN_RUNSC_LOG_DIR: path.join(dir, 'runsc'),
+    });
     mkdirSync(config.traceDir, { recursive: true });
-    const touch = (file, agoMs) => {
-      writeFileSync(file, 'x');
+    mkdirSync(config.runscLogDir, { recursive: true });
+    const touch = (file, agoMs, body = 'x') => {
+      writeFileSync(file, body);
       utimesSync(file, new Date(now - agoMs), new Date(now - agoMs));
     };
     touch(path.join(config.traceDir, `${CID_OLD}.jsonl`), 20 * 60_000);
     touch(path.join(config.traceDir, `${CID_NEW}.jsonl`), 60_000);
     touch(path.join(config.traceDir, 'notes.txt'), 20 * 60_000);
+    // runsc --debug-log files (7.6): old <cid> logs go, young ones stay, <unknown> goes when old or bloated.
+    touch(path.join(config.runscLogDir, `${CID_OLD}.boot.log`), 20 * 60_000);
+    touch(path.join(config.runscLogDir, `${CID_OLD}.gofer.log`), 20 * 60_000);
+    touch(path.join(config.runscLogDir, `${CID_NEW}.boot.log`), 60_000);
+    touch(path.join(config.runscLogDir, 'README'), 20 * 60_000);
+    let unknownLogs = 2;
+    try {
+      touch(path.join(config.runscLogDir, '<unknown>.features.log'), 20 * 60_000);
+      touch(path.join(config.runscLogDir, '<unknown>.delete.log'), 60_000, 'x'.repeat(5 * 1024 * 1024));
+    } catch {
+      unknownLogs = 0; // "<" is not a legal file name character on Windows
+    }
     for (const [id, agoMs] of [
       [OLD, 25 * 3600_000],
       [ACTIVE, 25 * 3600_000],
@@ -75,6 +93,8 @@ test('sweep: removes stale containers/networks, keeps active and young ones, cle
     assert.equal(summary.containers, 2);
     assert.equal(summary.networks, 1);
     assert.equal(summary.trace_files, 1);
+    assert.equal(summary.runsc_logs, 2 + unknownLogs);
+    assert.deepEqual(readdirSync(config.runscLogDir).sort(), ['README', `${CID_NEW}.boot.log`].sort());
     assert.equal(summary.run_dirs, 1);
     assert.equal(retried, 1);
     assert.ok(calls.includes(`rm -f fr-${OLD}-sb fr-${OLD}-sink`), calls.join('\n'));
@@ -92,7 +112,7 @@ test('sweep: removes stale containers/networks, keeps active and young ones, cle
 test('a failing docker step does not stop the file sweeps', async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'firstrun-janitor-'));
   try {
-    const config = loadConfig({ FIRSTRUN_RUNS_DIR: path.join(dir, 'runs'), FIRSTRUN_TRACE_DIR: path.join(dir, 'trace') });
+    const config = loadConfig({ FIRSTRUN_RUNS_DIR: path.join(dir, 'runs'), FIRSTRUN_TRACE_DIR: path.join(dir, 'trace'), FIRSTRUN_RUNSC_LOG_DIR: path.join(dir, 'runsc') });
     mkdirSync(config.traceDir, { recursive: true });
     const old = path.join(config.traceDir, `${CID_OLD}.jsonl`);
     writeFileSync(old, 'x');

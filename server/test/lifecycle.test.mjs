@@ -1,12 +1,13 @@
 // run/lifecycle.mjs with a fake docker: event order, files, teardown, watchdog, failure codes,
 // the harness path, and one pass through the real peer modules on the captured fixture.
 import assert from 'node:assert/strict';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../config.mjs';
+import { applyReview } from '../review/apply.mjs';
 import { newRunId } from '../run/ids.mjs';
 import { RunError, createLifecycle, loadModules } from '../run/lifecycle.mjs';
 import { createStorage } from '../storage/index.mjs';
@@ -120,6 +121,7 @@ function fakeModules(config, { needsHarness = false, t0 = true, contract = null 
         mkdirSync(path.join(seedDir, 'home', '.aws'), { recursive: true });
         writeFileSync(path.join(seedDir, 'home', '.aws', 'credentials'), 'aws_secret_access_key = FRTESTTOKEN\n');
         writeFileSync(path.join(seedDir, 'perms.txt'), '600 .aws/credentials\n');
+        return { seededPaths: ['/home/dev/.aws/credentials'] }; // what run/seed.mjs returns (7.6, fs.existing_file_changed)
       },
       evidence: ({ runId, onEvent, onAlert }) => {
         let attached = null;
@@ -191,9 +193,11 @@ async function setup({ env = {}, docker: dockerOpts = {}, modules: moduleOpts = 
     FIRSTRUN_SPOOL_DIR: path.join(dir, 'spool'),
     FIRSTRUN_SINK_SOCKET: path.join(dir, 'sink.sock'),
     FIRSTRUN_SAMPLES_DIR: path.join(dir, 'samples'),
+    FIRSTRUN_RUNSC_LOG_DIR: path.join(dir, 'runsc'),
     ...env,
   });
   mkdirSync(config.traceDir, { recursive: true });
+  mkdirSync(config.runscLogDir, { recursive: true });
   const logs = [];
   const log = (r) => logs.push(r);
   const storage = await createStorage({ config, log });
@@ -218,6 +222,14 @@ describe('lifecycle with fake docker and fake modules', () => {
       const run = makeRun();
       const runDir = path.join(t.config.runsDir, run.run_id);
       writeFileSync(path.join(t.config.traceDir, `${CID}.jsonl`), '{}\n'); // the sidecar's file for that container
+      for (const cmd of ['boot', 'create', 'gofer']) writeFileSync(path.join(t.config.runscLogDir, `${CID}.${cmd}.log`), 'x\n'); // runsc --debug-log (7.6)
+      const shared = [];
+      try {
+        writeFileSync(path.join(t.config.runscLogDir, '<unknown>.delete.log'), 'x\n');
+        shared.push('<unknown>.delete.log');
+      } catch {
+        // "<" is not a legal file name character on Windows
+      }
       let seenSeed = null;
       t.docker.runAttached = ((orig) => (argv) => {
         if (!argv.includes('FIRSTRUN_PHASE=unwrap')) {
@@ -276,6 +288,8 @@ describe('lifecycle with fake docker and fake modules', () => {
       assert.ok(calls.some((x) => x.includes('--runtime=runsc') && x.includes(`--network fr-${run.run_id}`) && x.includes('FIRSTRUN_PHASE=execute')));
       assert.equal(existsSync(runDir), false, 'run dir removed after a stored report');
       assert.equal(existsSync(path.join(t.config.traceDir, `${CID}.jsonl`)), false, 'trace file removed');
+      assert.deepEqual(readdirSync(t.config.runscLogDir), shared, 'runsc logs of the container removed, the shared one left to the janitor');
+      assert.ok(r.seededPaths.includes('/home/dev/.aws/credentials'), 'writeSeed paths reach the rules');
       assert.equal(JSON.stringify(t.logs).includes('echo hello'), false, 'command text never logged');
     } finally {
       t.close();
@@ -418,20 +432,15 @@ describe('lifecycle with fake docker and fake modules', () => {
     const llm = { modelsUsed: () => [{ role: 'harness', model: 'm', calls: 1, ms: 5, fallback: false }] };
     const t = await setup({ modules: { needsHarness: true }, llm });
     try {
-      // A slow harness loop must not delay the sandbox: hold it until the execute container ran.
-      let execStarted = false;
-      const origHarness = t.fakes.modules.harness;
-      t.fakes.modules.harness = async (args) => {
-        while (!execStarted) await new Promise((r) => setTimeout(r, 5));
-        return origHarness(args);
-      };
-      const origRun = t.docker.runAttached;
-      t.docker.runAttached = (argv) => {
-        if (!argv.includes('FIRSTRUN_PHASE=unwrap')) execStarted = true;
-        return origRun(argv);
-      };
+      // A slow harness loop must not delay the sandbox: hold it until exec.started is out.
       const run = makeRun('echo ZXZhbCB4 | base64 -d | bash\n');
       const c = makeCtx();
+      const origHarness = t.fakes.modules.harness;
+      t.fakes.modules.harness = async (args) => {
+        const giveUp = Date.now() + 10_000; // never hang the suite; the order assert below still fails
+        while (!c.events.some((e) => e.name === 'exec.started') && Date.now() < giveUp) await new Promise((r) => setTimeout(r, 5));
+        return origHarness(args);
+      };
       await t.lifecycle(run, c.ctx);
       assert.equal(t.fakes.seen.harnessRuns, 1);
       assert.deepEqual(t.fakes.seen.harnessResult, { stdout: 'echo decoded-layer\n', stderr: '', exit_code: 0, timed_out: false });
@@ -555,6 +564,129 @@ describe('lifecycle with the real peer modules on the captured fixture', () => {
       for (const d of report.decoys) if (d.value) assert.equal(text.includes(d.value), false, 'canary value never logged');
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('AI review and second try', () => {
+  const CLEAN = { findings: [], verdict: { level: 'CLEAN', rule_ids: [], coverage_notes: ['CLEAN means nothing suspicious was observed in this run (Linux sandbox, 60 s, no internet), not proof that the command is safe.'] }, classifications: {} };
+  const reason = { what: 'Deletes files', why: 'Not in the claim', quote: 'rm -rf x' };
+
+  async function reviewed(review) {
+    const t = await setup({ llm: {} });
+    t.fakes.modules.rules = (args) => {
+      t.fakes.seen.rulesCalls = (t.fakes.seen.rulesCalls ?? 0) + 1;
+      t.fakes.seen.rules = args;
+      return structuredClone(CLEAN);
+    };
+    t.fakes.modules.review = review;
+    t.fakes.modules.applyReview = applyReview;
+    return t;
+  }
+
+  test('a verified risk raises CLEAN to SUSPICIOUS, marked as not observed', async () => {
+    const t = await reviewed(async () => ({ review: { risk: 'high', summary: 'Deletes your files', real_machine_effects: [], reasons: [reason] }, retry: null, meta: { source: 'llm', ms: 5 } }));
+    try {
+      const run = makeRun();
+      const c = makeCtx();
+      await t.lifecycle(run, c.ctx);
+      assert.equal(c.report.verdict.level, 'SUSPICIOUS');
+      assert.deepEqual(c.report.verdict.rule_ids, ['ai.review']);
+      assert.ok(!c.report.verdict.coverage_notes.some((n) => n.startsWith('CLEAN means')));
+      const verdicts = c.events.filter((e) => e.name === 'verdict');
+      assert.equal(verdicts.length, 1, 'the verdict is announced once, after the review');
+      assert.equal(verdicts[0].verdict.level, 'SUSPICIOUS');
+      assert.equal(t.fakes.seen.report.review.risk, 'high');
+      assert.equal(t.fakes.seen.report.reviewMeta.source, 'llm');
+      assert.equal(t.fakes.seen.report.findings[0].observed, false);
+      assert.equal(t.fakes.seen.rulesCalls, 1, 'no second run, so the rules ran once');
+    } finally {
+      t.close();
+    }
+  });
+
+  test('a failed review leaves the rules verdict and says so', async () => {
+    const t = await reviewed(async () => ({ review: null, retry: null, meta: { source: 'failed', reason: 'timeout', ms: 5 } }));
+    try {
+      const c = makeCtx();
+      await t.lifecycle(makeRun(), c.ctx);
+      assert.equal(c.report.verdict.level, 'CLEAN');
+      assert.ok(c.report.verdict.coverage_notes.some((n) => n.includes('did not run')));
+    } finally {
+      t.close();
+    }
+  });
+
+  test('proof already in hand: no review call at all', async () => {
+    const t = await setup({ llm: {} });
+    try {
+      let called = 0;
+      t.fakes.modules.review = async () => void (called += 1);
+      const c = makeCtx();
+      await t.lifecycle(makeRun(), c.ctx);
+      assert.equal(called, 0);
+      assert.equal(c.report.verdict.level, 'MALICIOUS');
+    } finally {
+      t.close();
+    }
+  });
+
+  const knobs = { env: [['CI', 'true']], hostname: 'ci-runner-7', answerYes: true, skipSleep: true, timeoutS: 30 };
+  const retry = { why: 'It checks CI.', quote: '[ -n "$CI" ]', knobs };
+
+  test('second try: fresh sandbox with the settings, events appended, one retry only', async () => {
+    let reviews = 0;
+    const t = await reviewed(async () => {
+      reviews += 1;
+      return { review: { risk: 'none', summary: 's', real_machine_effects: [], reasons: [] }, retry, meta: { source: 'llm', ms: 5 } };
+    });
+    try {
+      const run = makeRun();
+      const c = makeCtx();
+      await t.lifecycle(run, c.ctx);
+      assert.equal(reviews, 1);
+      const runs = t.docker.calls.filter((x) => x.startsWith('run --name') && x.includes('FIRSTRUN_PHASE=execute'));
+      assert.equal(runs.length, 2);
+      assert.ok(runs[0].includes('--hostname devbox') && !runs[0].includes('CI=true'));
+      assert.ok(runs[1].includes('--hostname ci-runner-7') && runs[1].includes('CI=true') && runs[1].includes('FIRSTRUN_STDIN=answers') && runs[1].includes('FIRSTRUN_TIMEOUT=30'));
+      assert.equal(t.docker.calls.filter((x) => x.startsWith('network create')).length, 2, 'a fresh fake internet');
+
+      const started = c.events.find((e) => e.name === 'retry.started');
+      assert.deepEqual(started.settings, { set_env: ['CI'], hostname: 'ci-runner-7', answer_yes: true, skip_sleep: true });
+      assert.deepEqual(c.events.filter((e) => e.name === 'exec.started').map((e) => e.attempt), [1, 2]);
+
+      const seqs = t.fakes.seen.rules.events.map((e) => e.seq);
+      assert.deepEqual(seqs, [1, 2, 3, 4], 'no seq collides across the two runs');
+      const hit = t.fakes.seen.rules.events[3];
+      assert.equal(hit.attempt, 2);
+      assert.equal(hit.event_seq, 3, 'a hit still points at its own event');
+      assert.equal(t.fakes.seen.report.attempts.length, 2);
+      assert.equal(t.fakes.seen.report.attempts[1].settings.hostname, 'ci-runner-7');
+      assert.ok(!JSON.stringify(t.fakes.seen.report.attempts).includes('"true"'), 'values stay out of the report');
+      assert.ok(c.report.verdict.coverage_notes.some((n) => n.includes('second time')));
+      assert.equal(existsSync(path.join(t.config.runsDir, run.run_id)), false, 'run dir removed');
+    } finally {
+      t.close();
+    }
+  });
+
+  test('a second try that cannot run costs nothing: the first run stands', async () => {
+    const t = await reviewed(async () => ({ review: null, retry, meta: { source: 'llm', ms: 5 } }));
+    try {
+      const orig = t.docker.run;
+      let creates = 0;
+      t.docker.run = async (argv) => {
+        if (argv[0] === 'network' && argv[1] === 'create' && ++creates === 2) throw new Error('no network');
+        return orig(argv);
+      };
+      const c = makeCtx();
+      await t.lifecycle(makeRun(), c.ctx);
+      assert.equal(c.error, undefined);
+      assert.equal(c.report.verdict.level, 'CLEAN');
+      assert.equal(t.fakes.seen.report.attempts[1].failed, true);
+      assert.ok(!c.report.verdict.coverage_notes.some((n) => n.includes('second time')));
+    } finally {
+      t.close();
     }
   });
 });

@@ -5,6 +5,7 @@
 // cap stdout without killing the client, and killing the client would lose the exit code.
 import { execFile, spawn } from 'node:child_process';
 import { LIMITS } from '../config.mjs';
+import { DEFAULT_HOSTNAME, RETRY_ENV_NAMES, RETRY_HOSTNAMES } from '../review/knobs.mjs';
 import { RUN_ID_RE } from './ids.mjs';
 
 export const DOCKER_BIN = '/usr/bin/docker';
@@ -143,18 +144,28 @@ export function inspectSinkIpArgs(id) {
  * 5.1 (execute) and its unwrap variant: --network none, no /seed and no resolv.conf mount,
  * FIRSTRUN_PHASE=unwrap, FIRSTRUN_TIMEOUT=20, label firstrun.phase=unwrap, INTERP/EXT for launch.
  */
-export function sandboxRunArgs({ id, runDir, phase = 'execute', language = null, unwrapIndex = 0 }) {
+export function sandboxRunArgs({ id, runDir, phase = 'execute', language = null, unwrapIndex = 0, knobs = null }) {
   assertRunId(id);
   const s = LIMITS.sandbox;
   const unwrap = phase === 'unwrap';
   if (phase !== 'execute' && !unwrap) throw new TypeError('phase must be execute or unwrap');
+  // Second-try settings (review/knobs.mjs) are checked against the fixed menu again here, because
+  // this is the one place where anything becomes a Docker argument.
+  const hostname = knobs?.hostname ?? DEFAULT_HOSTNAME;
+  if (!RETRY_HOSTNAMES.includes(hostname)) throw new TypeError('unknown sandbox hostname');
+  const knobEnv = knobs?.env ?? [];
+  for (const [name, value] of knobEnv) {
+    if (!RETRY_ENV_NAMES.includes(name) || typeof value !== 'string' || /[\0\n\r]/.test(value)) throw new TypeError('unknown sandbox variable');
+  }
+  const timeoutS = knobs?.timeoutS ?? s.execTimeoutS;
+  if (!Number.isInteger(timeoutS) || timeoutS < 1 || timeoutS > s.execTimeoutS) throw new TypeError('bad sandbox timeout');
   const interp = unwrap ? INTERPRETERS[language] : null;
   if (unwrap && !interp) throw new TypeError('unsupported harness language');
   const name = unwrap ? names.unwrap(id, unwrapIndex) : names.sandbox(id);
   const cidfile = unwrap ? `${runDir}/unwrap-${unwrapIndex}.cid` : `${runDir}/sb.cid`;
   const argv = ['run', '--name', name, '--cidfile', cidfile, '--runtime=runsc'];
   if (unwrap) argv.push('--network', 'none');
-  else argv.push('--network', names.network(id), '--hostname', 'devbox');
+  else argv.push('--network', names.network(id), '--hostname', hostname);
   argv.push(
     '--read-only',
     '--tmpfs',
@@ -199,7 +210,7 @@ export function sandboxRunArgs({ id, runDir, phase = 'execute', language = null,
     '-e',
     'TERM=xterm-256color',
     '-e',
-    'PATH=/opt/firstrun/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+    `PATH=${knobs?.skipSleep ? '/opt/firstrun/fast:' : ''}/opt/firstrun/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
     '-e',
     'SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt',
     '-e',
@@ -211,9 +222,11 @@ export function sandboxRunArgs({ id, runDir, phase = 'execute', language = null,
     '-e',
     `FIRSTRUN_PHASE=${unwrap ? 'unwrap' : 'execute'}`,
     '-e',
-    `FIRSTRUN_TIMEOUT=${unwrap ? s.unwrapTimeoutS : s.execTimeoutS}`,
+    `FIRSTRUN_TIMEOUT=${unwrap ? s.unwrapTimeoutS : timeoutS}`,
   );
   if (unwrap) argv.push('-e', `INTERP=${interp.interp}`, '-e', `EXT=${interp.ext}`);
+  if (knobs?.answerYes) argv.push('-e', 'FIRSTRUN_STDIN=answers');
+  for (const [name, value] of knobEnv) argv.push('-e', `${name}=${value}`);
   argv.push(
     '--label',
     `${RUN_LABEL}=${id}`,

@@ -1,0 +1,4 @@
+#!/bin/sh
+# On a second try (docs/ARCHITECTURE.md 8.7) this comes first in PATH, so a command that waits out
+# the sandbox's time limit reaches whatever it was waiting to do.
+exit 0

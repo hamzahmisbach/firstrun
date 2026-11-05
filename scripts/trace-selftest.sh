@@ -5,9 +5,15 @@
 set -euo pipefail
 
 TRACE_DIR=/srv/firstrun/trace
+RUNSC_LOG_DIR=/var/log/firstrun/runsc
 SOCK=/run/firstrun/gvisor-sink.sock
 WORK="$(mktemp -d /tmp/firstrun-trace.XXXXXX)"
-trap 'rm -rf "$WORK"' EXIT
+# The probe's runsc logs (7.6) are removed too; the trace file is kept for inspection.
+cleanup() {
+  if [[ -s "$WORK/cid" ]]; then cid="$(cat "$WORK/cid")"; [[ "$cid" =~ ^[0-9a-f]{64}$ ]] && rm -f "$RUNSC_LOG_DIR/$cid".*.log; fi
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
 
 [[ -S "$SOCK" ]] || { echo "FAIL sidecar socket $SOCK is missing (systemctl status firstrun-sink)"; exit 1; }
 

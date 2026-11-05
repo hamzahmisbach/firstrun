@@ -1,0 +1,24 @@
+{
+  "seededPaths": [
+    "/home/dev/.aws/config",
+    "/home/dev/.aws/credentials",
+    "/home/dev/.bash_history",
+    "/home/dev/.bashrc",
+    "/home/dev/.cache/pip/selfcheck/x.json",
+    "/home/dev/.config/gh/hosts.yml",
+    "/home/dev/.git-credentials",
+    "/home/dev/.npmrc",
+    "/home/dev/.ssh/config",
+    "/home/dev/.ssh/id_ed25519",
+    "/home/dev/Documents/budget-2026.xlsx",
+    "/home/dev/Documents/invoice_2026_03.pdf",
+    "/home/dev/Documents/reading-list.md",
+    "/home/dev/Downloads/sales-leads.csv",
+    "/home/dev/Pictures/beach-sunset-0219.jpg",
+    "/home/dev/Pictures/family-photo-0412.jpg",
+    "/home/dev/projects/acme-app/.env",
+    "/home/dev/projects/acme-app/package.json",
+    "/home/dev/projects/acme-app/src/index.js",
+    "/home/dev/projects/acme-app/src/routes/users.js"
+  ]
+}

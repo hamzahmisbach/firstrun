@@ -4,6 +4,7 @@ import { fetchRun, openRunStream } from './sse.js';
 
 const CODE_KEY = 'firstrun.accessCode';
 const RUN_ID_RE = /^[0-9A-Z]{26}$/;
+const LANDING_SECTIONS = ['hero', 'how', 'limits']; // hidden while a run is shown
 
 const form = $('run-form');
 const commandEl = $('command');
@@ -60,12 +61,13 @@ async function loadSamples() {
     return;
   }
   for (const s of samples) {
-    // Only what the person would have seen: no description of what is hidden, no expected verdict.
-    const command = String(s.command ?? '').trim().replace(/\s+/g, ' ');
-    const btn = el('button', { type: 'button', class: 'sample', 'aria-pressed': 'false', 'data-id': s.id, 'aria-label': `Sample: ${String(s.title ?? s.id).slice(0, 100)}` }, [
-      el('span', { class: 'sample-title', text: String(s.title ?? s.id).slice(0, 100) }),
-      el('span', { class: 'sample-desc', text: `You were told: “${String(s.claim ?? '').slice(0, 300)}”` }),
-      command ? el('span', { class: 'sample-cmd', text: command.length > 72 ? `${command.slice(0, 72)}…` : command }) : null,
+    // Only what the person would have seen: the title and the claim. No command text, no
+    // description of what is hidden, no expected verdict.
+    const title = String(s.title ?? s.id).slice(0, 100);
+    const claim = String(s.claim ?? '').slice(0, 300);
+    const btn = el('button', { type: 'button', class: 'sample', 'aria-pressed': 'false', 'data-id': s.id, 'aria-label': `Example: ${title}, told “${claim}”` }, [
+      el('span', { class: 'sample-title', text: title }),
+      claim ? el('span', { class: 'sample-claim', text: claim }) : null,
     ]);
     btn.addEventListener('click', () => selectSample(s.id === selectedSample?.id ? null : s));
     samplesEl.append(btn);
@@ -204,11 +206,10 @@ function startRun(runId, { reportUrl, after = 0 } = {}) {
   const view = createRunView(runViewEl, { reportUrl: url });
   runIdLine.textContent = `Run ${runId}. Share link: ${url.startsWith('http') ? url : `${location.origin}${url}`}`;
   runCard.hidden = false;
-  $('form-card').hidden = true;
-  $('intro').hidden = true;
+  for (const id of LANDING_SECTIONS) $(id).hidden = true;
   history.replaceState(null, '', `/?run=${runId}`);
-  runCard.scrollIntoView({ block: 'start', behavior: 'smooth' });
-  $('run-title').focus?.();
+  window.scrollTo({ top: 0 });
+  $('run-title').focus?.({ preventScroll: true });
 
   let retries = 0;
   const open = (afterId) => {
@@ -246,8 +247,7 @@ $('new-run').addEventListener('click', () => {
   stream?.close();
   stream = null;
   runCard.hidden = true;
-  $('form-card').hidden = false;
-  $('intro').hidden = false;
+  for (const id of LANDING_SECTIONS) $(id).hidden = false;
   history.replaceState(null, '', '/');
   selectSample(null);
   commandEl.value = '';

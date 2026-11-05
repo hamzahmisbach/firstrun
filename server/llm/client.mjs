@@ -109,7 +109,9 @@ export function createLlm({
       max_completion_tokens: maxTokens,
       temperature: cfg.temperature ?? 0,
       seed: config.seed ?? 7,
-      reasoning: { enabled: false },
+      // Only the main model of a call that asks for it. The fallback runs after a timeout or a bad
+      // answer, so it answers straight away to fit in the time left.
+      reasoning: { enabled: cfg.reasoning === true && model === cfg.model },
     };
     const jsonMode = cfg.json_mode ?? 'json_object';
     if (jsonMode === 'json_schema') {
@@ -148,7 +150,8 @@ export function createLlm({
       // outlives the phase it belongs to.
       const left = remaining();
       if (left < MIN_REQUEST_MS) throw new LlmError('timeout', `llm ${callName}: deadline reached`);
-      const timeoutMs = Math.min(cfg.timeout_ms ?? 20000, left);
+      // Floored: `left` is fractional, and AbortSignal.timeout throws on anything but an integer.
+      const timeoutMs = Math.floor(Math.min(cfg.timeout_ms ?? 20000, left));
       stats.attempts += 1;
       let res;
       try {

@@ -1,0 +1,14 @@
+{
+  "level": "SUSPICIOUS",
+  "rule_ids": [
+    "fs.agent_hook_write"
+  ],
+  "severity_counts": {
+    "high": 4
+  },
+  "findings_count": 4,
+  "rules_absent": [
+    "fs.unexpected_write",
+    "decoy.write"
+  ]
+}

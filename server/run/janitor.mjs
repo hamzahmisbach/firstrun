@@ -105,6 +105,37 @@ export function createJanitor({ config, docker, storage = null, isActive = () =>
     }
   }
 
+  /**
+   * runsc --debug-log files (7.6): `<cid>.<command>.log` left by a crashed run, and the
+   * `<unknown>.<command>.log` files runsc appends to for commands without a container id.
+   */
+  async function sweepRunscLogs(summary) {
+    if (!config.runscLogDir) return;
+    let entries;
+    try {
+      entries = await readdir(config.runscLogDir);
+    } catch (err) {
+      if (err.code === 'ENOENT') return;
+      throw err;
+    }
+    for (const name of entries) {
+      const m = /^([0-9a-f]{64}|<unknown>)\.[a-z0-9_-]+\.log$/.exec(name);
+      if (!m) continue;
+      const file = path.join(config.runscLogDir, name);
+      let info;
+      try {
+        info = await stat(file);
+      } catch {
+        continue;
+      }
+      const old = now() - info.mtimeMs > J.orphanAgeMs;
+      const bloated = m[1] === '<unknown>' && info.size > J.unknownLogMaxBytes;
+      if (!old && !bloated) continue;
+      await unlink(file).catch(() => {});
+      summary.runsc_logs += 1;
+    }
+  }
+
   async function sweepRunDirs(summary) {
     let entries;
     try {
@@ -138,11 +169,12 @@ export function createJanitor({ config, docker, storage = null, isActive = () =>
   async function sweep() {
     if (sweeping) return null;
     sweeping = true;
-    const summary = { containers: 0, networks: 0, trace_files: 0, run_dirs: 0, spool: null };
+    const summary = { containers: 0, networks: 0, trace_files: 0, runsc_logs: 0, run_dirs: 0, spool: null };
     const steps = [
       ['containers', () => sweepContainers(summary)],
       ['networks', () => sweepNetworks(summary)],
       ['trace', () => sweepTraceFiles(summary)],
+      ['runsc_logs', () => sweepRunscLogs(summary)],
       ['run_dirs', () => sweepRunDirs(summary)],
       ['spool', async () => storage && (summary.spool = await storage.retrySpool())],
     ];

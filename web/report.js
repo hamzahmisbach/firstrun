@@ -1,5 +1,9 @@
 // Report page for /r/<id>: GET /api/runs/:id, then render the section 10.3 report with textContent
 // only. While the run is still going, the live view from ui.js takes over until run.done.
+//
+// Order for a non-expert: verdict + what to do next, told-versus-did side by side, plain words and
+// findings. Everything else (hidden code, decoys, every event, output, timing, limits) sits behind
+// tabs so the default page stays short.
 import {
   $,
   SEVERITY_LABEL,
@@ -11,6 +15,7 @@ import {
   clear,
   createRunView,
   describeEvent,
+  describeSettings,
   el,
   errorText,
   fmtBytes,
@@ -18,6 +23,7 @@ import {
   fmtMs,
   homePath,
   levelClass,
+  verdictIcon,
   verdictLead,
   verdictSentence,
 } from './ui.js';
@@ -31,6 +37,7 @@ const str = (v, max = 400) => {
 };
 const arr = (v) => (Array.isArray(v) ? v : []);
 const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 let stream = null;
 const sampleTitles = new Map(); // sample_id -> title, from GET /api/samples (best effort)
@@ -138,23 +145,27 @@ function renderReport(report) {
   const findings = arr(report.findings).filter((f) => f && typeof f === 'object');
   const input = obj(report.input);
   const notes = new Map(arr(explanation.finding_notes).filter((n) => n && typeof n.finding_id === 'string').map((n) => [n.finding_id, str(n.text, 200)]));
+  const layers = arr(report.layers).filter((l) => l && typeof l === 'object');
+  const output = obj(report.output);
 
   document.title = `${VERDICT_WORD[level] ?? 'Report'}: FirstRun report`;
 
-  // Order for a non-expert: verdict, plain words, told-versus-happened, findings; the limits of
-  // the run come after that as a quiet section, then the detail.
+  const tabs = [
+    { id: 'code', label: 'Hidden code', count: layers.length, panel: renderLayers(layers, input) },
+    { id: 'decoys', label: 'Fake credentials', count: decoys.size, panel: renderDecoys(decoys, events) },
+    { id: 'events', label: 'Everything recorded', count: events.length, panel: renderEvents(events, bySeq, decoys) },
+    output.stdout_preview || output.stderr_preview ? { id: 'output', label: 'Output', panel: renderOutput(output) } : null,
+    { id: 'behind', label: 'Behind the scenes', panel: renderTiming(obj(report.timing), arr(report.models_used), obj(report.coverage)) },
+    { id: 'limits', label: 'Limits of this run', panel: renderCoverage(verdict) },
+  ].filter((t) => t && t.panel);
+
   append(
     root,
     renderHero(report, verdict, level, explanation, input),
-    renderExplanation(explanation, report.explanation_meta),
     renderCompare(report, input, events, decoys),
-    renderFindings(findings, bySeq, decoys, notes),
-    renderCoverage(verdict),
-    renderLayers(arr(report.layers), input),
-    renderDecoys(decoys, events),
-    renderEvents(events, bySeq, decoys),
-    renderOutput(obj(report.output)),
-    renderTiming(obj(report.timing), arr(report.models_used), obj(report.coverage)),
+    el('div', { class: 'explain-grid' }, [renderExplanation(explanation, report.explanation_meta), renderFindings(findings, bySeq, decoys, notes)]),
+    renderReview(obj(report.review), obj(report.review_meta), arr(report.attempts)),
+    renderTabs(tabs),
   );
   $('loading').hidden = true;
   root.hidden = false;
@@ -162,20 +173,17 @@ function renderReport(report) {
 
 function renderHero(report, verdict, level, explanation, input) {
   const hero = el('section', { class: `verdict-hero level-${levelClass(level)}`, 'aria-labelledby': 'verdict-word' });
-  append(
-    hero,
+  const main = el('div', { class: 'verdict-main' }, [
     el('p', { class: 'verdict-label', text: 'Verdict' }),
-    el('h1', { class: 'verdict-word', id: 'verdict-word', text: VERDICT_WORD[level] ?? (str(level, 20) || 'No verdict') }),
+    el('h1', { class: 'verdict-word', id: 'verdict-word' }, [verdictIcon(level), VERDICT_WORD[level] ?? (str(level, 20) || 'No verdict')]),
     el('p', { class: 'verdict-sentence', text: verdictSentence(level) }),
-    explanation.headline ? el('p', { class: 'verdict-headline', text: str(explanation.headline, 120) }) : null,
-    el('p', { class: 'verdict-next', text: str(explanation.next_step, 200) || verdictLead(level) }),
-  );
-  if (report.stub) {
-    hero.append(el('p', { class: 'verdict-meta', text: 'Stub build: the command was not executed; this report only exercises the pipeline.' }));
-  }
+    explanation.headline ? el('p', { class: 'verdict-headline', text: str(explanation.headline, 160) }) : null,
+    report.stub ? el('p', { class: 'verdict-meta', text: 'Stub build: the command was not executed; this report only exercises the pipeline.' }) : null,
+  ]);
+
   const shareUrl = location.href.split('#')[0];
   const shareBtn = el('button', { type: 'button', class: 'btn btn-primary', id: 'share' }, 'Share this report');
-  const shareStatus = el('span', { class: 'muted small', role: 'status', 'aria-live': 'polite' });
+  const shareStatus = el('span', { class: 'share-status', role: 'status', 'aria-live': 'polite' });
   shareBtn.addEventListener('click', async () => {
     try {
       if (navigator.share && /Mobi|Android/i.test(navigator.userAgent)) {
@@ -189,39 +197,78 @@ function renderHero(report, verdict, level, explanation, input) {
       shareStatus.textContent = `Copy this link: ${shareUrl}`;
     }
   });
-  append(
-    hero,
-    el('div', { class: 'btn-row share-row' }, [shareBtn, el('a', { class: 'btn', href: '/' }, 'Check another command'), shareStatus]),
+  const side = el('div', { class: 'verdict-side' }, [
+    el('div', { class: 'next-box' }, [
+      el('p', { class: 'verdict-label', text: 'What to do next' }),
+      el('p', { class: 'verdict-next', text: str(explanation.next_step, 200) || verdictLead(level) }),
+    ]),
+    el('div', { class: 'btn-row' }, [shareBtn, el('a', { class: 'btn', href: '/' }, 'Check another command')]),
+    shareStatus,
     el('div', { class: 'report-meta' }, [
-      el('span', { text: report.created_at ? `Run on ${fmtDate(report.created_at)}` : '' }),
-      input.sample_id ? el('span', { text: `Sample: ${str(sampleTitles.get(input.sample_id) ?? input.sample_id, 100)}` }) : null,
+      report.created_at ? el('span', { text: `Run on ${fmtDate(report.created_at)}` }) : null,
+      input.sample_id ? el('span', { text: `Example: ${str(sampleTitles.get(input.sample_id) ?? input.sample_id, 100)}` }) : null,
       el('span', { class: 'mono', text: str(report.run_id, 26) }),
     ]),
-  );
+  ]);
+  append(hero, main, side);
   return hero;
 }
 
 function renderCoverage(verdict) {
   const notes = arr(verdict.coverage_notes).filter((n) => typeof n === 'string' && n.trim());
   if (notes.length === 0) return null;
-  return el('section', { class: 'card coverage', 'aria-labelledby': 'coverage-title' }, [
-    el('h2', { id: 'coverage-title', text: 'What this run could and could not see' }),
-    el('ul', {}, notes.map((n) => el('li', { text: str(n, 400) }))),
+  return el('div', {}, [
+    el('p', { class: 'muted', text: 'What this run could and could not see:' }),
+    el('ul', { class: 'notes-list' }, notes.map((n) => el('li', {}, el('span', { text: str(n, 400) })))),
   ]);
 }
 
 function renderExplanation(explanation, meta) {
   const paragraphs = arr(explanation.paragraphs).filter((p) => typeof p === 'string' && p.trim());
   if (paragraphs.length === 0) return null;
-  const source = obj(meta).source === 'llm' ? `Written by ${str(obj(meta).model, 60) || 'a language model'} on Vultr Serverless Inference from the findings below; the verdict itself comes from fixed rules.` : 'Written from a template; the verdict comes from fixed rules.';
+  const source = obj(meta).source === 'llm' ? `Written by ${str(obj(meta).model, 60) || 'a language model'} on Vultr Serverless Inference from the findings; the verdict itself comes from fixed rules.` : 'Written from a template; the verdict comes from fixed rules.';
   return el('section', { class: 'card explain', 'aria-labelledby': 'explain-title' }, [
     el('h2', { id: 'explain-title', text: 'In plain words' }),
-    ...paragraphs.slice(0, 3).map((p) => el('p', { text: str(p, 600) })),
-    el('p', { class: 'muted small', style: 'margin-top:12px', text: source }),
+    ...paragraphs.slice(0, 3).map((p) => el('p', { class: 'para', text: str(p, 600) })),
+    el('p', { class: 'source', text: source }),
   ]);
 }
 
-// Claim vs observed -----------------------------------------------------------------------------
+// AI reading of the code --------------------------------------------------------------------------
+
+function renderReview(review, meta, attempts) {
+  const second = obj(attempts[1]);
+  const hasReview = typeof review.summary === 'string' && review.summary.trim() !== '';
+  if (!hasReview && !second.attempt) return null;
+  const risky = review.risk === 'concern' || review.risk === 'high';
+  const reasons = arr(review.reasons).filter((r) => r && typeof r === 'object');
+  const effects = arr(review.real_machine_effects).filter((e) => typeof e === 'string' && e.trim());
+  const changed = describeSettings(second.settings);
+  const model = str(meta.model, 60);
+  return el('section', { class: `card ai-review${risky ? ' is-risky' : ''}`, 'aria-labelledby': 'review-title' }, [
+    el('h2', { id: 'review-title', text: 'What an AI saw reading the code' }),
+    el('p', { class: 'ai-review-tag', text: 'This is a reading of the code, not something observed in the sandbox. It can raise a verdict, never lower one.' }),
+    hasReview ? el('p', { class: 'para', text: str(review.summary, 300) }) : null,
+    effects.length ? el('ul', { class: 'ai-effects' }, effects.slice(0, 6).map((e) => el('li', { text: str(e, 200) }))) : null,
+    reasons.length
+      ? el('ul', { class: 'ai-reasons' }, reasons.slice(0, 6).map((r) => el('li', {}, [
+          el('p', { text: `${str(r.what, 200)}. ${str(r.why, 300)}` }),
+          el('code', { class: 'mono ai-quote', text: str(r.quote, 200) }),
+        ])))
+      : null,
+    second.attempt
+      ? el('div', { class: 'ai-second' }, [
+          el('h3', { text: second.failed ? 'A second run was tried but could not start' : 'FirstRun ran it a second time' }),
+          second.why ? el('p', { text: str(second.why, 200) }) : null,
+          changed ? el('p', { class: 'muted', text: `This time it ${changed}.` }) : null,
+          second.quote ? el('code', { class: 'mono ai-quote', text: str(second.quote, 200) }) : null,
+        ])
+      : null,
+    model ? el('p', { class: 'source', text: `Read by ${model} on Vultr Serverless Inference.` }) : null,
+  ]);
+}
+
+// Told vs did ------------------------------------------------------------------------------------
 
 function observed(events, decoys) {
   const hosts = new Map(); // host -> classification (worst wins)
@@ -297,6 +344,8 @@ function renderCompare(report, input, events, decoys) {
   const o = observed(events, decoys);
   const decoyLabel = (id) => `${homePath(decoys.get(id)?.path) || id} (fake ${categoryLabel(decoys.get(id)?.category)})`;
 
+  const summary = `${plural(events.length, 'recorded event')}: ${plural(o.hosts.size, 'host')} contacted, ${plural(o.credFiles.size, 'credential file')} touched, ${plural(o.uploads.length, 'upload')}, ${plural(o.leaked.size, 'fake credential')} leaked.`;
+
   const rows = [
     ['Network', plainList(contract.expected_hosts, 'No hosts expected'), listCell(o.hosts, { empty: 'No network activity' })],
     ['Files written', plainList(contract.expected_write_paths, 'No files expected'), listCell(o.written, { empty: 'No files written outside the sandbox baseline' })],
@@ -319,27 +368,29 @@ function renderCompare(report, input, events, decoys) {
     rows.push(['Fake credentials leaked', el('span', { class: 'empty', text: 'Never acceptable' }), listCell(o.leaked, { empty: '', labelFor: decoyLabel })]);
   }
 
-  const sourceText = meta.source === 'fallback' ? 'The claim could not be turned into a checklist; everything is treated as unexplained.' : meta.source === 'llm+fixture' ? 'Checklist written by a language model from the claim, merged with the sample’s known-good list.' : meta.source === 'llm' ? 'Checklist written by a language model from the claim alone, before anything ran.' : '';
+  const sourceText = meta.source === 'fallback' ? 'The claim could not be turned into a checklist; everything is treated as unexplained.' : meta.source === 'llm+fixture' ? 'Checklist written by a language model from the claim, merged with the example’s known-good list.' : meta.source === 'llm' ? 'Checklist written by a language model from the claim alone, before anything ran.' : '';
+  const noteText = [sourceText, contract.notes ? str(contract.notes, 500) : ''].filter(Boolean).join(' ');
+
+  const row = (label, told, did, extra = '') =>
+    el('div', { class: `compare-row${extra}` }, [
+      el('div', { class: 'compare-area', text: label }),
+      el('div', { class: 'compare-cell', 'data-label': 'You were told' }, told),
+      el('div', { class: 'compare-cell', 'data-label': 'It actually did' }, did),
+    ]);
 
   return el('section', { class: 'card', 'aria-labelledby': 'compare-title' }, [
-    el('h2', { id: 'compare-title', text: 'What you were told, against what happened' }),
-    el('div', { class: 'compare' }, [
-      el('div', { class: 'compare-col told' }, [
-        el('h3', { text: 'You were told' }),
-        el('p', { class: 'quote', text: `“${str(input.claim, 300)}”` }),
-        contract.summary ? el('p', { class: 'muted', style: 'margin-top:8px', text: `Read as: ${str(contract.summary, 300)}` }) : null,
-        sourceText ? el('p', { class: 'muted small', style: 'margin-top:8px', text: sourceText }) : null,
-        contract.notes ? el('p', { class: 'muted small', style: 'margin-top:6px', text: str(contract.notes, 500) }) : null,
-      ]),
-      el('div', { class: 'compare-col' }, [
-        el('h3', { text: 'The sandbox saw' }),
-        el('p', { text: `${events.length} recorded ${events.length === 1 ? 'event' : 'events'}: ${o.hosts.size} ${o.hosts.size === 1 ? 'host' : 'hosts'} contacted, ${o.credFiles.size} credential ${o.credFiles.size === 1 ? 'file' : 'files'} touched, ${o.uploads.length} ${o.uploads.length === 1 ? 'upload' : 'uploads'}, ${o.leaked.size} fake ${o.leaked.size === 1 ? 'credential' : 'credentials'} leaked.` }),
-      ]),
+    el('h2', { id: 'compare-title', text: 'What you were told, against what it actually did' }),
+    el('div', { class: 'compare-grid' }, [
+      el('div', { class: 'compare-head', 'aria-hidden': 'true' }, [el('span'), el('span', { text: 'You were told' }), el('span', { class: 'did', text: 'It actually did' })]),
+      row(
+        'The claim',
+        [el('p', { class: 'quote', text: `“${str(input.claim, 300)}”` }), contract.summary ? el('p', { class: 'muted small', text: `Read as: ${str(contract.summary, 300)}` }) : null],
+        el('p', { text: summary }),
+        ' is-claim',
+      ),
+      ...rows.map(([label, told, did]) => row(label, told, did)),
     ]),
-    el('table', { class: 'compare-table' }, [
-      el('thead', {}, el('tr', {}, [el('th', { text: 'Area' }), el('th', { text: 'Expected from the claim' }), el('th', { text: 'Observed in the sandbox' })])),
-      el('tbody', {}, rows.map(([label, told, saw]) => el('tr', {}, [el('td', { text: label }), el('td', { 'data-label': 'Expected from the claim' }, told), el('td', { 'data-label': 'Observed in the sandbox' }, saw)]))),
-    ]),
+    noteText ? el('p', { class: 'compare-note', text: noteText }) : null,
   ]);
 }
 
@@ -363,18 +414,67 @@ function renderFindings(findings, bySeq, decoys, notes) {
       el('div', { class: 'finding-head' }, [
         el('span', { class: `sev sev-${str(f.severity, 10)}`, text: SEVERITY_LABEL[f.severity] ?? str(f.severity, 10) }),
         el('span', { class: 'finding-title', text: str(f.title, 200) }),
-        classChip(cls),
       ]),
       notes.has(f.id) ? el('p', { class: 'finding-note', text: notes.get(f.id) }) : null,
-      evs.length
-        ? el('details', {}, [el('summary', { text: `Evidence: ${evs.length} recorded ${evs.length === 1 ? 'event' : 'events'}` }), el('ul', { class: 'evidence' }, evs.slice(0, 50).map((ev) => evidenceRow(ev, bySeq, decoys)))])
-        : el('p', { class: 'muted small', text: `Rule ${str(f.rule_id, 60)}` }),
+      el('div', { class: 'finding-foot' }, [
+        f.observed === false ? el('span', { class: 'cls cls-ai', text: 'AI reading, not observed' }) : classChip(cls),
+        evs.length
+          ? el('details', {}, [el('summary', { text: plural(evs.length, 'recorded event') }), el('ul', { class: 'evidence' }, evs.slice(0, 50).map((ev) => evidenceRow(ev, bySeq, decoys)))])
+          : el('span', { class: 'muted small', text: `Rule ${str(f.rule_id, 60)}` }),
+      ]),
     ]);
   });
-  return el('section', { class: 'card', 'aria-labelledby': 'findings-title' }, [title, el('ol', { class: 'findings' }, items)]);
+  // The first findings carry the verdict (the server orders them by severity); the long tail of
+  // low ones folds away so the page stays short.
+  const SHOWN = 5;
+  const rest = items.slice(SHOWN);
+  return el('section', { class: 'card', 'aria-labelledby': 'findings-title' }, [
+    title,
+    el('ol', { class: 'findings' }, items.slice(0, SHOWN)),
+    rest.length
+      ? el('details', { class: 'findings-rest' }, [el('summary', { text: `Show ${plural(rest.length, 'more finding')}` }), el('ol', { class: 'findings', start: SHOWN + 1 }, rest)])
+      : null,
+  ]);
 }
 
-// Layers and input ------------------------------------------------------------------------------
+// Tabs --------------------------------------------------------------------------------------------
+
+function renderTabs(tabs) {
+  if (tabs.length === 0) return null;
+  const list = el('div', { class: 'tablist', role: 'tablist', 'aria-label': 'Details' });
+  const panels = [];
+  const buttons = tabs.map((t, i) => {
+    const btn = el('button', { type: 'button', class: 'tab', role: 'tab', id: `tab-${t.id}`, 'aria-controls': `panel-${t.id}`, 'aria-selected': i === 0 ? 'true' : 'false', tabindex: i === 0 ? '0' : '-1' }, [
+      t.label,
+      typeof t.count === 'number' ? el('span', { class: 'count', text: `${t.count}` }) : null,
+    ]);
+    const panel = el('div', { class: 'tabpanel', role: 'tabpanel', id: `panel-${t.id}`, 'aria-labelledby': `tab-${t.id}`, tabindex: '0', hidden: i !== 0 }, t.panel);
+    panels.push(panel);
+    return btn;
+  });
+  const select = (i, focus = false) => {
+    buttons.forEach((b, j) => {
+      b.setAttribute('aria-selected', i === j ? 'true' : 'false');
+      b.tabIndex = i === j ? 0 : -1;
+      panels[j].hidden = i !== j;
+    });
+    if (focus) buttons[i].focus();
+  };
+  buttons.forEach((b, i) => {
+    b.addEventListener('click', () => select(i));
+    b.addEventListener('keydown', (e) => {
+      const n = buttons.length;
+      const next = e.key === 'ArrowRight' ? (i + 1) % n : e.key === 'ArrowLeft' ? (i - 1 + n) % n : e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : -1;
+      if (next === -1) return;
+      e.preventDefault();
+      select(next, true);
+    });
+  });
+  list.append(...buttons);
+  return el('section', { class: 'tabs', 'aria-label': 'Details of this run' }, [list, ...panels]);
+}
+
+// Layers and input --------------------------------------------------------------------------------
 
 const METHOD_LABEL = {
   base64: 'base64', base64_utf16le: 'base64 (UTF-16, PowerShell style)', hex: 'hex', hex_escape: 'hex escapes', url: 'URL encoding',
@@ -383,13 +483,12 @@ const METHOD_LABEL = {
 };
 
 function renderLayers(layers, input) {
-  const commandBlock = el('details', { open: layers.length === 0 ? null : true }, [
-    el('summary', { text: 'The command exactly as pasted' }),
+  const commandBlock = el('div', {}, [
+    el('h3', { style: 'margin-bottom:8px', text: 'The command exactly as pasted' }),
     el('pre', { class: 'cmd-box', text: str(input.command, 16384) }),
   ]);
-  const title = el('h2', { id: 'layers-title', class: 'section-title' }, ['Hidden layers', el('span', { class: 'count', text: `${layers.length}` })]);
   if (layers.length === 0) {
-    return el('section', { class: 'card', 'aria-labelledby': 'layers-title' }, [title, el('p', { class: 'muted', style: 'margin-bottom:12px', text: 'The command was not encoded or wrapped; what you see is what ran.' }), commandBlock]);
+    return [el('p', { class: 'muted', text: 'The command was not encoded or wrapped; what you see is what ran.' }), commandBlock];
   }
   const items = layers.map((l) => {
     const method = str(l.method, 30);
@@ -411,24 +510,20 @@ function renderLayers(layers, input) {
       markerText.length ? el('p', { class: 'layer-markers', text: `Signs in this layer: ${markerText.join('; ')}` }) : null,
     ]);
   });
-  return el('section', { class: 'card', 'aria-labelledby': 'layers-title' }, [
-    title,
-    el('p', { class: 'muted', style: 'margin-bottom:12px', text: 'The command hid code behind encoding. Each layer below is what the previous one would have executed; nothing here was run on your behalf outside the sandbox.' }),
+  return [
+    el('p', { class: 'muted', text: 'The command hid code behind encoding. Each layer below is what the previous one would have executed; nothing here was run outside the sandbox.' }),
     el('ol', { class: 'layers' }, items),
-    el('div', { style: 'margin-top:12px' }, commandBlock),
-  ]);
+    el('div', { style: 'margin-top:16px' }, commandBlock),
+  ];
 }
 
-// Decoys ----------------------------------------------------------------------------------------
+// Decoys ------------------------------------------------------------------------------------------
 
 function renderDecoys(decoys, events) {
   const leaked = new Set(events.filter((e) => e.kind === 'canary.hit').map((e) => e.decoy_id));
   const read = new Set(events.filter((e) => e.kind === 'file.open' && e.decoy_id).map((e) => e.decoy_id));
   const list = [...decoys.values()];
-  const title = el('h2', { id: 'decoys-title', class: 'section-title' }, ['Fake credentials in this sandbox', el('span', { class: 'count', text: `${list.length}` })]);
-  if (list.length === 0) {
-    return el('section', { class: 'card', 'aria-labelledby': 'decoys-title' }, [title, el('p', { class: 'muted', text: 'No decoy manifest was recorded for this run.' })]);
-  }
+  if (list.length === 0) return el('p', { class: 'muted', text: 'No decoy manifest was recorded for this run.' });
   const stateOf = (d) => (leaked.has(d.id) ? 'leaked' : read.has(d.id) ? 'read' : 'untouched');
   const order = { leaked: 0, read: 1, untouched: 2 };
   list.sort((a, b) => order[stateOf(a)] - order[stateOf(b)]);
@@ -439,22 +534,21 @@ function renderDecoys(decoys, events) {
     return el('li', { class: `decoy is-${state}` }, [
       el('span', { class: 'path', text: homePath(d.path) || str(d.id, 40) }),
       el('span', { class: 'cat', text: `fake ${categoryLabel(d.category)}` }),
-      el('span', { class: 'badge', text: state === 'leaked' ? 'sent out' : state === 'read' ? 'opened' : 'untouched' }),
+      el('span', { class: 'state', text: state === 'leaked' ? 'sent out' : state === 'read' ? 'opened' : 'untouched' }),
       d.value ? el('span', { class: 'val', text: `token ${str(d.value, 64)}` }) : null,
     ]);
   };
   const touchedText = touched.length === 0 ? 'The command touched none of them.' : `The command touched ${touched.length} of them:`;
-  return el('section', { class: 'card', 'aria-labelledby': 'decoys-title' }, [
-    title,
-    el('p', { class: 'decoy-intro', text: `Every credential in this sandbox was created for this run: ${list.length} decoy ${list.length === 1 ? 'file' : 'files'} with random tokens that are worthless anywhere else. No container ever held a real secret; the keys FirstRun itself uses never leave the host. ${touchedText}` }),
+  return [
+    el('p', { class: 'decoy-intro', text: `Every credential in this sandbox was created for this run: ${plural(list.length, 'decoy file')} with random tokens that are worthless anywhere else. No container ever held a real secret. ${touchedText}` }),
     touched.length ? el('ul', { class: 'decoys' }, touched.map(row)) : null,
     untouched.length
-      ? el('details', { class: 'decoys-rest' }, [
-          el('summary', { text: touched.length ? `${untouched.length} other fake ${untouched.length === 1 ? 'credential was' : 'credentials were'} not touched` : `Show all ${untouched.length} untouched fake credentials` }),
+      ? el('details', { class: 'decoys-rest', open: touched.length === 0 ? true : null }, [
+          el('summary', { text: touched.length ? `${untouched.length} other fake ${untouched.length === 1 ? 'credential was' : 'credentials were'} not touched` : `All ${untouched.length} fake credentials` }),
           el('ul', { class: 'decoys' }, untouched.map(row)),
         ])
       : null,
-  ]);
+  ];
 }
 
 // Every event -------------------------------------------------------------------------------------
@@ -468,10 +562,7 @@ const FILTERS = [
 ];
 
 function renderEvents(events, bySeq, decoys) {
-  const title = el('h2', { id: 'events-title', class: 'section-title' }, ['Everything recorded', el('span', { class: 'count', text: `${events.length}` })]);
-  if (events.length === 0) {
-    return el('section', { class: 'card', 'aria-labelledby': 'events-title' }, [title, el('p', { class: 'muted', text: 'No events were recorded.' })]);
-  }
+  if (events.length === 0) return el('p', { class: 'muted', text: 'No events were recorded.' });
   const list = el('ol', { class: 'events' });
   const filters = el('div', { class: 'event-filters', role: 'group', 'aria-label': 'Filter events' });
   const apply = (id) => {
@@ -499,21 +590,21 @@ function renderEvents(events, bySeq, decoys) {
     filters.append(chip);
   }
   apply('all');
-  return el('section', { class: 'card', 'aria-labelledby': 'events-title' }, [title, filters, list]);
+  return [filters, list];
 }
 
-// Output, timing, models --------------------------------------------------------------------------
+// Output, timing, models ----------------------------------------------------------------------------
 
 function renderOutput(output) {
   const out = str(output.stdout_preview, 32768);
   const err = str(output.stderr_preview, 32768);
   if (!out && !err) return null;
-  return el('section', { class: 'card', 'aria-labelledby': 'output-title' }, [
-    el('h2', { id: 'output-title', text: 'What the command printed' }),
-    out ? el('details', {}, [el('summary', { text: `Output (${fmtBytes(output.stdout_bytes ?? out.length)})` }), el('pre', { class: 'cmd-box', text: out })]) : null,
-    err ? el('details', { style: 'margin-top:8px' }, [el('summary', { text: `Errors (${fmtBytes(output.stderr_bytes ?? err.length)})` }), el('pre', { class: 'cmd-box', text: err })]) : null,
+  return [
+    el('p', { class: 'muted', text: 'What the command printed inside the sandbox.' }),
+    out ? el('div', {}, [el('h3', { style: 'margin-bottom:8px', text: `Output (${fmtBytes(output.stdout_bytes ?? out.length)})` }), el('pre', { class: 'cmd-box', text: out })]) : null,
+    err ? el('div', { style: 'margin-top:12px' }, [el('h3', { style: 'margin-bottom:8px', text: `Errors (${fmtBytes(output.stderr_bytes ?? err.length)})` }), el('pre', { class: 'cmd-box', text: err })]) : null,
     output.truncated ? el('p', { class: 'muted small', style: 'margin-top:8px', text: 'The output was cut at the preview limit.' }) : null,
-  ]);
+  ];
 }
 
 function renderTiming(timing, models, coverage) {
@@ -522,7 +613,7 @@ function renderTiming(timing, models, coverage) {
   ].filter(([k]) => typeof timing[k] === 'number');
   const modelLines = models
     .filter((m) => m && typeof m === 'object')
-    .map((m) => `${str(m.role, 20)}: ${str(m.model, 60) || 'no model'}${m.fallback ? ' (fell back to the template)' : ''}${typeof m.calls === 'number' ? `, ${m.calls} ${m.calls === 1 ? 'call' : 'calls'}` : ''}${typeof m.ms === 'number' ? `, ${fmtMs(m.ms)}` : ''}`);
+    .map((m) => `${str(m.role, 20)}: ${str(m.model, 60) || 'no model'}${m.fallback ? ' (fell back to the template)' : ''}${typeof m.calls === 'number' ? `, ${plural(m.calls, 'call')}` : ''}${typeof m.ms === 'number' ? `, ${fmtMs(m.ms)}` : ''}`);
   const cov = [
     coverage.mode ? `evidence mode ${str(coverage.mode, 20)}` : '',
     typeof coverage.gvisor_dropped === 'number' && coverage.gvisor_dropped > 0 ? `${coverage.gvisor_dropped} sandbox events dropped` : '',
@@ -532,12 +623,11 @@ function renderTiming(timing, models, coverage) {
     arr(coverage.tls_unreadable).length ? `${arr(coverage.tls_unreadable).length} encrypted connections not inspected` : '',
   ].filter(Boolean);
   if (steps.length === 0 && modelLines.length === 0 && cov.length === 0) return null;
-  return el('section', { class: 'card', 'aria-labelledby': 'timing-title' }, [
-    el('h2', { id: 'timing-title', text: 'Behind the scenes' }),
+  return [
     steps.length ? el('dl', { class: 'timing' }, steps.map(([k, label]) => el('div', {}, [el('dt', { text: label }), el('dd', { text: fmtMs(timing[k]) })]))) : null,
-    modelLines.length ? el('p', { class: 'muted small', style: 'margin-top:12px', text: `Vultr Serverless Inference: ${modelLines.join('; ')}.` }) : null,
+    modelLines.length ? el('p', { class: 'muted small', style: 'margin-top:14px', text: `Vultr Serverless Inference: ${modelLines.join('; ')}.` }) : null,
     cov.length ? el('p', { class: 'muted small', style: 'margin-top:6px', text: `Coverage: ${cov.join(', ')}.` }) : null,
-  ]);
+  ];
 }
 
 load();

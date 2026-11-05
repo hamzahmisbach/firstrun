@@ -8,28 +8,39 @@
   <link rel="stylesheet" href="/static/style.css?v=dev">
 </head>
 <body>
-  <div class="page">
-    <header class="site-head">
-      <a class="wordmark" href="/"><span class="wordmark-mark"></span>FirstRun</a>
-      <span class="tagline">Inspection report</span>
-    </header>
+  <header class="site-head">
+    <div class="wrap">
+      <a class="wordmark" href="/" aria-label="FirstRun home">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect class="mark-bg" x="1" y="1" width="22" height="22" rx="6"/><path class="mark-fg" d="M8 7.5l5 4.5-5 4.5M13.5 16.5H17" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        FirstRun
+      </a>
+      <nav class="site-nav" aria-label="Site">
+        <a class="btn btn-sm" href="/">Check another command</a>
+      </nav>
+    </div>
+  </header>
 
-    <main id="main">
-      <p class="muted" id="loading" role="status">Loading the report…</p>
-      <section id="error" class="error-box" role="alert" hidden></section>
-      <section id="live" hidden>
-        <h1 class="section-title" style="font-size:1.4rem;margin-bottom:6px">This run is still in progress</h1>
-        <p class="muted" style="margin-bottom:18px">The page updates live and turns into the report when the run finishes.</p>
-        <div id="run-view"></div>
-      </section>
-      <div id="report" hidden></div>
-    </main>
+  <main id="main" class="wrap report-page">
+    <p class="loading" id="loading" role="status">Loading the report…</p>
+    <section id="error" class="error-box" role="alert" hidden></section>
+    <section id="live" class="narrow" style="margin:0 auto" hidden>
+      <div class="run-top">
+        <div>
+          <h1 class="run-top-title" style="font-size:1.5rem">This run is still in progress</h1>
+          <p class="run-id">The page updates live and turns into the report when the run finishes.</p>
+        </div>
+      </div>
+      <div id="run-view"></div>
+    </section>
+    <div id="report" class="report-stack" hidden></div>
+  </main>
 
-    <footer class="site-foot">
+  <footer class="site-foot">
+    <div class="wrap">
       <span>FirstRun runs on Vultr Cloud Compute with gVisor sandboxes, Vultr Serverless Inference for unwrapping and explanations, and Vultr Object Storage for reports.</span>
       <span>Reports are unlisted and kept for a limited time. To have one removed, contact the team listed in the project README.</span>
-    </footer>
-  </div>
+    </div>
+  </footer>
   <script type="module" src="/static/report.js?v=dev"></script>
 </body>
 </html>

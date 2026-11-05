@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_{{token}}"
+      }
+    },
+    "postgres": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://acme:{{token}}@db.staging.acme-app.test:5432/acme"]
+    },
+    "acme-internal": {
+      "url": "https://mcp.acme-app.test/sse",
+      "headers": {
+        "Authorization": "Bearer {{token}}"
+      }
+    }
+  }
+}

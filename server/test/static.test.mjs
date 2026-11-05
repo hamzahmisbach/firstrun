@@ -19,6 +19,7 @@ function writeWeb(dir, { skip = null } = {}) {
     'ui.js': 'export const ui = 1;',
     'sse.js': 'export const sse = 1;',
     'app.js': 'import { ui } from "./ui.js";\nimport "./sse.js";\nimport "./nope.js";\nconsole.log("app")',
+    'chain.js': 'export const chain = 1;',
     'report.js': 'console.log("report")',
     'secret.txt': 'must never be served',
   };
@@ -63,7 +64,7 @@ describe('createStatic', () => {
   test('allowlist covers exactly the web files the pages need', () => {
     assert.deepEqual(Object.values(PAGES), ['index.html', 'robots.txt']);
     assert.equal(REPORT_PAGE, 'report.html');
-    assert.deepEqual([...ASSETS], ['style.css', 'ui.js', 'sse.js', 'app.js', 'report.js']);
+    assert.deepEqual([...ASSETS], ['style.css', 'ui.js', 'sse.js', 'app.js', 'chain.js', 'report.js']);
   });
 
   test('/ serves index.html with asset hashes substituted and no-cache', async () => {

@@ -20,7 +20,7 @@ const ASSET_TYPES = {
 /** Everything the web server can ever hand out. Pages are keyed by URL path, assets by file name. */
 export const PAGES = Object.freeze({ '/': 'index.html', '/robots.txt': 'robots.txt' });
 export const REPORT_PAGE = 'report.html';
-export const ASSETS = Object.freeze(['style.css', 'ui.js', 'sse.js', 'app.js', 'report.js']);
+export const ASSETS = Object.freeze(['style.css', 'ui.js', 'sse.js', 'app.js', 'chain.js', 'report.js']);
 /** Self-hosted IBM Plex (web/fonts/LICENSE-IBM-Plex.txt), so a page needs no other site. */
 export const FONTS = Object.freeze([
   'fonts/plex-sans-400.woff2',

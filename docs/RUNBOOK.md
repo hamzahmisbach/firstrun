@@ -16,6 +16,12 @@ systemd starts it again (`Restart=always`). The sidecar keeps running; restart i
 `scripts/trace-selftest.sh` fails: `sudo systemctl restart firstrun-sink firstrun` (in that order,
 because runsc refuses to start a sandbox while the sidecar socket is missing: fail closed).
 
+Sending new files to the VM does not change the trace session: the live copy is
+`/etc/firstrun/trace-session.json`. After changing `infra/gvisor-sink/trace-session.json`, install it
+with `sudo install -m 0644 /opt/firstrun/infra/gvisor-sink/trace-session.json /etc/firstrun/trace-session.json`.
+Each new sandbox reads it when it starts. After changing `gvisor-sink.py`, restart both services as
+above. Check either change with `sudo bash /opt/firstrun/scripts/trace-selftest.sh`.
+
 ## Check that it is healthy
 
 ```bash

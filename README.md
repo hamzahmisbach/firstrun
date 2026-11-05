@@ -61,7 +61,7 @@ FirstRun runs the command for you, somewhere it cannot hurt, and answers with on
 | **Suspicious** | It did something the claim does not explain, or an AI reading of the code found a concern. Look before you decide. | [`shim` report](https://firstrun.makmurlab.com/r/88AM2Y4Z6ETZPS4MWC3CYKTXT8) |
 | **Clean** | Nothing suspicious was seen in this run. That is not a promise that the command is safe. | [`nvm` report](https://firstrun.makmurlab.com/r/B74XVMEN26HZN8TE3JY74KBHDG) |
 
-Each report shows what you were told against what happened, every recorded event, the fake credentials that were on the machine, any hidden code that was decoded, and a plain explanation with a link you can share.
+Each report shows what you were told against what happened, which program started which, every recorded event, the fake credentials that were on the machine, any hidden code that was decoded, and a plain explanation with a link you can share.
 
 ### See it for real
 

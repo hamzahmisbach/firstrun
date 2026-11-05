@@ -58,7 +58,8 @@ const envelope = {
   ts_ms: z.number().int().nonnegative(),
   t_rel_ms: z.number().int(),
 };
-const gvisor = { ...envelope, source: z.literal('gvisor') };
+// forks: [child, parent] for processes that never ran a program, so the report can link them (7.3).
+const gvisor = { ...envelope, source: z.literal('gvisor'), forks: z.array(z.tuple([z.number().int(), z.number().int()])).optional() };
 const sinkhole = { ...envelope, source: z.literal('sinkhole') };
 const orchestrator = { ...envelope, source: z.literal('orchestrator') };
 
@@ -134,6 +135,7 @@ export const EVENT_SCHEMAS = {
     tool: z.string().min(1),
     args: z.array(z.string()),
     pid: z.number().int().optional(),
+    ppid: z.number().int().optional(),
   }),
   'dns.query': z.looseObject({
     ...sinkhole,

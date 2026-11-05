@@ -17,6 +17,7 @@ const HOME = '/home/dev';
 const SEED_HOME = '/seed/home';
 const SHIM_CANARIES = '/seed/shim-canaries.json';
 const CMD_SH = '/work/cmd.sh';
+const MAX_FORK_LINKS = 64; // per event, so a long fork chain cannot make one event huge
 const ANSWERS_FILE = '/work/answers.txt'; // stdin of a second try, opened by launch itself (8.7)
 
 /** Successful reads under these prefixes are loader/runtime noise (7.3). */
@@ -144,6 +145,9 @@ export function createNormalizer({ runId, decoys = [], onEvent, log = () => {}, 
   const seenConnect = new Set();
   const seenFileop = new Set();
   const shimPids = new Set();
+  const forkParent = new Map(); // child pid -> pid that forked it, from sentry/clone
+  const execed = new Set(); // every pid that ran a program
+  const forkLinked = new Set(); // forks whose parent has already gone out on an event
   const pendingSinkhole = [];
   // 7.6: cwd per thread group (from execve context, AT_FDCWD arguments, chdir/fchdir and clone
   // inheritance) and the symlinks the run created, so a path through one of them still names the
@@ -176,16 +180,31 @@ export function createNormalizer({ runId, decoys = [], onEvent, log = () => {}, 
     return false;
   }
 
+  /**
+   * Parent links for processes that never ran a program, which no proc.exec can name (7.3). Each goes
+   * out once, on the first event that needs it.
+   */
+  function forkLinks(pid) {
+    const links = [];
+    for (let p = pid; links.length < MAX_FORK_LINKS && forkParent.has(p) && !execed.has(p) && !forkLinked.has(p); p = forkParent.get(p)) {
+      forkLinked.add(p);
+      links.push([p, forkParent.get(p)]);
+    }
+    return links;
+  }
+
   /** Assign the envelope, validate, store and deliver. Returns the event or null. */
   function emit(partial, tsMs) {
     if (capped(partial.kind)) return null;
     const ts = tsMs ?? Date.now();
+    const forks = forkLinks(partial.kind === 'proc.exec' || partial.kind === 'shim.call' ? partial.ppid : partial.pid);
     const event = {
       run_id: runId,
       seq: seq + 1,
       ts_ms: ts,
       t_rel_ms: ts - (t0Ms ?? ts),
       ...partial,
+      ...(forks.length ? { forks } : {}),
     };
     const parsed = safeValidateEvent(event);
     if (!parsed.success) {
@@ -231,6 +250,7 @@ export function createNormalizer({ runId, decoys = [], onEvent, log = () => {}, 
     const pid = Number(ctx.thread_group_id ?? 0);
     const ppid = Number(ctx.parent_thread_group_id ?? 0);
     if (typeof ctx.cwd === 'string' && ctx.cwd.startsWith('/')) cwdByPid.set(pid, ctx.cwd);
+    execed.add(pid);
 
     if (t0Ns === null) {
       if (execfn === limits.t0Marker || argv[0] === limits.t0Marker) {
@@ -256,7 +276,7 @@ export function createNormalizer({ runId, decoys = [], onEvent, log = () => {}, 
     if ([execfn, binaryPath, argv0Abs].some((p) => p && p.startsWith(prefix))) {
       shimPids.add(pid);
       const name = execfn ?? argv[0] ?? binaryPath;
-      return emit({ source: 'gvisor', kind: 'shim.call', tool: path.posix.basename(name), args: argv.slice(1), pid }, tsMs);
+      return emit({ source: 'gvisor', kind: 'shim.call', tool: path.posix.basename(name), args: argv.slice(1), pid, ppid }, tsMs);
     }
 
     const exe = execfn ?? binaryPath ?? argv0Abs;
@@ -267,6 +287,18 @@ export function createNormalizer({ runId, decoys = [], onEvent, log = () => {}, 
     const event = { source: 'gvisor', kind: 'proc.exec', pid, ppid, exe, argv, cwd };
     if (binaryPath && binaryPath !== exe) event.interp = binaryPath;
     return emit(event, tsMs);
+  }
+
+  /** Who forked whom, nothing else: no event of its own. A new thread stays in its thread group. */
+  function clone(msg, ctx) {
+    if (t0Ns === null) {
+      coverage.pre_t0 += 1;
+      return null;
+    }
+    const parent = Number(ctx.thread_group_id ?? 0);
+    const child = Number(msg.created_thread_group_id ?? 0);
+    if (parent > 0 && child > 0 && child !== parent) forkParent.set(child, parent);
+    return null;
   }
 
   function openat(msg, ctx, tsMs) {
@@ -589,6 +621,8 @@ export function createNormalizer({ runId, decoys = [], onEvent, log = () => {}, 
       return null;
     }
     switch (record.type) {
+      case 2:
+        return clone(msg, ctx);
       case 3:
         return execve(msg, ctx, tsMs, timeNs);
       case 7:

@@ -2,7 +2,7 @@
 // only. While the run is still going, the live view from ui.js takes over until run.done.
 //
 // Order for a non-expert: verdict + what to do next, told-versus-did side by side, plain words and
-// findings. Everything else (hidden code, decoys, every event, output, timing, limits) sits behind
+// findings. Everything else (hidden code, who started what, decoys, every event, output, timing, limits) sits behind
 // tabs so the default page stays short.
 import {
   $,
@@ -28,6 +28,7 @@ import {
   verdictStamp,
 } from './ui.js';
 import { fetchRun, openRunStream } from './sse.js';
+import { buildProcessChains, flagLevel, isFlagged, nodeLabel } from './chain.js';
 
 const RUN_ID_RE = /^[0-9A-Z]{26}$/;
 const runId = location.pathname.startsWith('/r/') ? location.pathname.slice(3) : '';
@@ -148,10 +149,13 @@ function renderReport(report) {
   const layers = arr(report.layers).filter((l) => l && typeof l === 'object');
   const output = obj(report.output);
 
+  const chains = buildProcessChains(events);
+
   document.title = `${VERDICT_WORD[level] ?? 'Report'}: FirstRun report`;
 
   const tabs = [
     { id: 'code', label: 'Hidden code', count: layers.length, panel: renderLayers(layers, input) },
+    { id: 'chain', label: 'Who started what', count: chains.reduce((n, run) => n + run.programs, 0), panel: renderChain(chains, events, bySeq, decoys, arr(report.attempts)) },
     { id: 'decoys', label: 'Fake credentials', count: decoys.size, panel: renderDecoys(decoys, events) },
     { id: 'events', label: 'Everything recorded', count: events.length, panel: renderEvents(events, bySeq, decoys) },
     output.stdout_preview || output.stderr_preview ? { id: 'output', label: 'Output', panel: renderOutput(output) } : null,
@@ -518,6 +522,163 @@ function renderLayers(layers, input) {
   ];
 }
 
+// Who started what ----------------------------------------------------------------------------------
+
+const CHAIN_FLAG_CLASS = ['', ' flag-warn', ' flag-bad'];
+// These details say the same thing on every line, so only "Everything recorded" spells them out.
+const CHAIN_QUIET_DETAIL = new Set(['net.connect', 'dns.query', 'tls.clienthello', 'shim.call']);
+const CHAIN_FOLD_AT = 10; // a longer stretch of unflagged lines folds after the first few
+const CHAIN_FOLD_SHOW = 6;
+const CHAIN_MAX_DEPTH = 10; // programs nested deeper are listed without more indent
+const CHAIN_MAX_LINES = 1000;
+
+function chainEventRow(ev, ctx) {
+  ctx.lines += 1;
+  const d = describeEvent(ev, ctx.bySeq, ctx.decoys);
+  // A fake credential the claim explains (npm reading ~/.npmrc) is worth its label, not an alarm.
+  const tone = d.tone === 'bad' && flagLevel(ev) === 0 ? 'neutral' : d.tone;
+  return el('li', { class: `chain-event tone-${tone}` }, [
+    el('div', { class: 'ev-text' }, [d.text, ' ', isFlagged(ev) || ev.decoy_id ? classChip(ev.classification) : null]),
+    d.detail && !CHAIN_QUIET_DETAIL.has(ev.kind) ? el('div', { class: 'ev-detail', text: d.detail }) : null,
+  ]);
+}
+
+function chainHead(node) {
+  const { program, args } = nodeLabel(node);
+  const exec = node.execs[0];
+  const title = node.isCommand
+    ? [el('span', { class: 'chain-self', text: 'Your command' })]
+    : program
+      ? [el('code', { class: 'chain-prog', text: str(program, 80) }), args ? el('code', { class: 'chain-args', text: str(args, 240) }) : null]
+      : [el('span', { class: 'chain-note', text: 'A copy of another process; which one was not recorded' })];
+  return el('div', { class: 'chain-head' }, [
+    ...title,
+    exec && isFlagged(exec) ? classChip(exec.classification) : null,
+    node.parentUnknown && program ? el('span', { class: 'chain-note', text: 'what started it was not recorded' }) : null,
+    el('span', { class: 'chain-pid', text: `process ${str(node.pid, 10)}` }),
+  ]);
+}
+
+/** Everything below a node in order, without recursion, for programs past the indent limit. */
+function chainFlat(node) {
+  const out = [];
+  const stack = [...node.items].reverse();
+  while (stack.length) {
+    const item = stack.pop();
+    out.push(item);
+    if (item.type !== 'child') continue;
+    for (let i = item.node.items.length - 1; i >= 0; i -= 1) stack.push(item.node.items[i]);
+  }
+  return out;
+}
+
+function chainRows(items, depth, ctx, flat = false) {
+  const rows = [];
+  let quiet = [];
+  const flush = () => {
+    const fold = quiet.length > CHAIN_FOLD_AT;
+    rows.push(...(fold ? quiet.slice(0, CHAIN_FOLD_SHOW) : quiet).map((ev) => chainEventRow(ev, ctx)));
+    if (fold) {
+      const rest = quiet.slice(CHAIN_FOLD_SHOW);
+      const fit = rest.slice(0, Math.max(0, CHAIN_MAX_LINES - ctx.lines));
+      if (fit.length < rest.length) ctx.cut = true;
+      rows.push(el('li', { class: 'chain-more' }, el('details', {}, [
+        el('summary', { text: `${rest.length} more of what it did` }),
+        el('ul', { class: 'chain-fold' }, fit.map((ev) => chainEventRow(ev, ctx))),
+      ])));
+    }
+    quiet = [];
+  };
+  for (const item of items) {
+    if (ctx.lines >= CHAIN_MAX_LINES) {
+      ctx.cut = true;
+      break;
+    }
+    if (item.type === 'event' && flagLevel(item.ev) === 0) {
+      quiet.push(item.ev);
+      continue;
+    }
+    flush();
+    if (item.type === 'event') {
+      rows.push(chainEventRow(item.ev, ctx));
+    } else if (flat) {
+      ctx.lines += 1;
+      rows.push(el('li', { class: `chain-node${CHAIN_FLAG_CLASS[item.node.flag]}` }, chainHead(item.node)));
+    } else {
+      rows.push(chainNode(item.node, depth + 1, ctx));
+    }
+  }
+  flush();
+  return rows;
+}
+
+function chainNode(node, depth, ctx) {
+  ctx.lines += 1;
+  const flat = depth >= CHAIN_MAX_DEPTH;
+  const shown = (item) => !ctx.flaggedOnly || (item.type === 'child' ? item.node.flag > 0 : flagLevel(item.ev) > 0);
+  const items = (flat ? chainFlat(node) : node.items).filter(shown);
+  return el('li', { class: `chain-node${CHAIN_FLAG_CLASS[node.flag]}` }, [
+    chainHead(node),
+    flat && items.some((item) => item.type === 'child') ? el('p', { class: 'chain-note', text: 'Programs nested deeper than this are listed without more indent.' }) : null,
+    items.length ? el('ul', { class: 'chain-items' }, chainRows(items, depth, ctx, flat)) : null,
+  ]);
+}
+
+function chainRun(run, ctx) {
+  const roots = run.roots.filter((node) => !ctx.flaggedOnly || node.flag > 0);
+  const loose = run.unattached.filter((ev) => !ctx.flaggedOnly || flagLevel(ev) > 0);
+  if (roots.length === 0 && loose.length === 0) return [el('p', { class: 'muted small', text: 'Nothing flagged in this run.' })];
+  return [
+    roots.length ? el('ul', { class: 'chain' }, roots.map((node) => chainNode(node, 0, ctx))) : null,
+    loose.length
+      ? el('div', { class: 'chain-loose' }, [
+          el('p', { class: 'label', text: 'Not tied to one program' }),
+          el('ul', {}, chainRows(loose.map((ev) => ({ type: 'event', ev })), 0, ctx)),
+        ])
+      : null,
+  ];
+}
+
+function renderChain(runs, events, bySeq, decoys, attempts) {
+  if (runs.length === 0) return null;
+  const twoRuns = runs.some((run) => run.attempt === 2);
+  const changed = describeSettings(obj(attempts[1]).settings);
+  const anyFlag = events.some(isFlagged);
+  const tree = el('div', { class: 'chain-tree' });
+  const filters = el('div', { class: 'event-filters', role: 'group', 'aria-label': 'Filter the programs' });
+  const draw = (flaggedOnly) => {
+    for (const chip of filters.children) chip.setAttribute('aria-pressed', (chip.dataset.id === 'flagged') === flaggedOnly ? 'true' : 'false');
+    clear(tree);
+    const ctx = { bySeq, decoys, flaggedOnly, lines: 0, cut: false };
+    if (twoRuns && runs[0].attempt === 2) {
+      tree.append(el('div', { class: 'chain-run' }, [el('h3', { class: 'sub-title', text: 'First run' }), el('p', { class: 'muted small', text: 'Nothing was recorded.' })]));
+    }
+    for (const run of runs) {
+      tree.append(el('div', { class: 'chain-run' }, [
+        twoRuns ? el('h3', { class: 'sub-title', text: run.attempt === 2 ? 'Second run' : 'First run' }) : null,
+        twoRuns && run.attempt === 2 && changed ? el('p', { class: 'muted small', text: `This time it ${changed}.` }) : null,
+        ...chainRun(run, ctx),
+      ]));
+    }
+    if (ctx.cut) tree.append(el('p', { class: 'muted small gap-top', text: `The list stops at about ${CHAIN_MAX_LINES} lines. Every event is under Everything recorded.` }));
+  };
+  if (anyFlag) {
+    for (const [id, label] of [['all', 'All'], ['flagged', 'Flagged']]) {
+      const chip = el('button', { type: 'button', class: 'chip', 'data-id': id, 'aria-pressed': 'false', text: label });
+      chip.addEventListener('click', () => draw(id === 'flagged'));
+      filters.append(chip);
+    }
+  }
+  // A very long run opens on what matters, since the full list may be cut before reaching it.
+  draw(anyFlag && events.length > CHAIN_MAX_LINES / 2);
+  const network = events.some((e) => e.source === 'sinkhole') ? ' Records from the fake network carry no process number, so each goes to the program that last connected to that port, matched by time.' : '';
+  return [
+    el('p', { class: 'muted', text: `Each program sits under the one that started it, with what it did in the order it was recorded. This only arranges the record and has no part in the verdict.${network}` }),
+    anyFlag ? filters : null,
+    tree,
+  ];
+}
+
 // Decoys ------------------------------------------------------------------------------------------
 
 function renderDecoys(decoys, events) {
@@ -556,7 +717,7 @@ function renderDecoys(decoys, events) {
 
 const FILTERS = [
   ['all', 'All', () => true],
-  ['flagged', 'Flagged', (e) => e.classification === 'forbidden' || e.classification === 'unexplained' || e.kind === 'canary.hit'],
+  ['flagged', 'Flagged', isFlagged],
   ['network', 'Network', (e) => e.source === 'sinkhole' || e.kind === 'net.connect'],
   ['files', 'Files', (e) => e.kind === 'file.open'],
   ['programs', 'Programs', (e) => e.kind === 'proc.exec' || e.kind === 'shim.call'],

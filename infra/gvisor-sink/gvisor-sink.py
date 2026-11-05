@@ -28,11 +28,13 @@ PROTOCOL_VERSION = 1
 HEADER = struct.Struct("<HHI")
 MAX_PACKET = 1 << 20  # gVisor's reference server reads with the same buffer size
 MAX_DECODED_PER_CONN = 50_000  # beyond this a flooding sandbox is only counted, not decoded
+MAX_CLONES_PER_CONN = 20_000  # forks only link the process tree, so they cannot use up the budget above
 HEARTBEAT_SECONDS = 10
 CONTAINER_ID = re.compile(r"^[0-9a-f]{64}$")
 
 DECODERS = {
     common_pb2.MESSAGE_CONTAINER_START: container_pb2.Start,
+    common_pb2.MESSAGE_SENTRY_CLONE: sentry_pb2.CloneInfo,
     common_pb2.MESSAGE_SENTRY_EXEC: sentry_pb2.ExecveInfo,
     common_pb2.MESSAGE_SYSCALL_OPEN: syscall_pb2.Open,
     common_pb2.MESSAGE_SYSCALL_CONNECT: syscall_pb2.Connect,
@@ -63,6 +65,7 @@ class Connection:
         self.decode_errors = 0
         self.ignored = 0
         self.capped = 0
+        self.clones = 0
 
     def file_for(self, container_id):
         name = container_id if CONTAINER_ID.match(container_id) else f"unknown-{self.conn_id}"
@@ -88,7 +91,11 @@ class Connection:
             self.decode_errors += 1
             return
         self.dropped = dropped
-        if self.received > MAX_DECODED_PER_CONN:
+        if message_type == common_pb2.MESSAGE_SENTRY_CLONE:
+            self.clones += 1
+            if self.clones > MAX_CLONES_PER_CONN:
+                return
+        elif self.received - self.clones > MAX_DECODED_PER_CONN:
             self.capped += 1
             return
         message_class = DECODERS.get(message_type)

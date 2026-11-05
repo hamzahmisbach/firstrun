@@ -1,18 +1,23 @@
 // Shared rendering for the landing page and the report page. Every value that comes from a run
 // is untrusted: this file only ever uses textContent / createTextNode, never innerHTML.
 
+// Direction controls make text read differently from what it says (U+202E shows "evil" as "live"),
+// which a report must not allow, so they are written out instead of obeyed.
+const DIRECTION_CONTROLS = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
+export const showControls = (s) => String(s).replace(DIRECTION_CONTROLS, (c) => `[U+${c.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}]`);
+
 export function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
   for (const [key, value] of Object.entries(attrs)) {
     if (value === null || value === undefined || value === false) continue;
     if (key === 'class') node.className = value;
-    else if (key === 'text') node.textContent = value;
+    else if (key === 'text') node.textContent = showControls(value);
     else if (key === 'hidden') node.hidden = Boolean(value);
     else node.setAttribute(key, value === true ? '' : String(value));
   }
   for (const child of Array.isArray(children) ? children : [children]) {
     if (child === null || child === undefined || child === false) continue;
-    node.append(typeof child === 'string' ? document.createTextNode(child) : child);
+    node.append(typeof child === 'string' ? document.createTextNode(showControls(child)) : child);
   }
   return node;
 }
@@ -32,7 +37,7 @@ export const $ = (id) => document.getElementById(id);
 // Formatting
 
 const str = (v, max = 400) => {
-  const s = typeof v === 'string' ? v : v === null || v === undefined ? '' : String(v);
+  const s = showControls(typeof v === 'string' ? v : v === null || v === undefined ? '' : String(v));
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 };
 

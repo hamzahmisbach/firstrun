@@ -79,6 +79,50 @@ test('T0 gating: everything before the launch execve is dropped and counted, not
   assert.equal(n.coverage().pre_t0, 6);
 });
 
+test('sentry/clone: no event of its own; a fork that runs no program is named once, on the first event that needs it', () => {
+  const { n, events } = setup();
+  boot(n);
+  const fork = (parent, child) => rec(2, { context_data: ctx(parent), created_thread_id: child, created_thread_group_id: child, flags: '17' });
+  n.gvisor(exec(30, 5, '/usr/bin/bash', ['bash', 'install.sh']));
+  n.gvisor(fork(30, 31)); // a subshell
+  assert.equal(n.gvisor(fork(31, 31)), null, 'a new thread in the same group is not a process');
+  n.gvisor(fork(31, 32)); // its subshell, which only forks
+  n.gvisor(fork(32, 33)); // goes on to run curl
+  assert.equal(events.length, 1, 'forks alone emit nothing');
+  n.gvisor(exec(33, 32, '/usr/bin/curl', ['curl', 'x']));
+  assert.deepEqual(events.at(-1).forks, [[32, 31], [31, 30]], 'up through the forks to the program that made them');
+  n.gvisor(openAt(31, '/home/dev/out', { flags: String(0o101) }));
+  assert.equal(events.at(-1).forks, undefined, 'each link goes out once');
+  n.gvisor(fork(33, 34));
+  n.gvisor(openAt(34, '/home/dev/log', { flags: String(0o101) }));
+  assert.deepEqual(events.at(-1).forks, [[34, 33]], 'a fork writing a file before any exec names its parent');
+  n.gvisor(exec(34, 33, '/usr/bin/id', ['id']));
+  assert.equal(events.at(-1).forks, undefined, 'a program that ran needs no link above it');
+  assert.equal(events.at(0).forks, undefined);
+  n.gvisor(fork(30, 40));
+  n.gvisor(exec(41, 40, '/opt/firstrun/shims/_shim', ['/opt/firstrun/shims/crontab', '-l'], { execfn: '/opt/firstrun/shims/crontab' }));
+  assert.equal(events.at(-1).kind, 'shim.call');
+  assert.deepEqual(events.at(-1).forks, [[40, 30]], 'a stand-in tool is linked like any program');
+});
+
+test('sentry/clone before T0 is not tracked', () => {
+  const { n, events } = setup();
+  n.gvisor(rec(2, { context_data: ctx(1), created_thread_id: 2, created_thread_group_id: 2 }));
+  boot(n);
+  n.gvisor(openAt(2, '/home/dev/out', { flags: String(0o101) }));
+  assert.equal(events.at(-1).forks, undefined);
+  assert.equal(n.coverage().pre_t0 >= 1, true);
+});
+
+test('a long fork chain cannot make one event huge', () => {
+  const { n, events } = setup();
+  boot(n);
+  n.gvisor(exec(30, 5, '/usr/bin/bash', ['bash', 'x']));
+  for (let pid = 100; pid < 300; pid += 1) n.gvisor(rec(2, { context_data: ctx(pid - 1), created_thread_id: pid, created_thread_group_id: pid }));
+  n.gvisor(exec(299, 298, '/usr/bin/id', ['id']));
+  assert.equal(events.at(-1).forks.length, 64);
+});
+
 test('execve: shim prefix in execfn, binary_path or argv[0] -> shim.call; interp kept when different', () => {
   const { n, events } = setup();
   boot(n);
@@ -90,10 +134,10 @@ test('execve: shim prefix in execfn, binary_path or argv[0] -> shim.call; interp
   n.gvisor(exec(24, 5, '/usr/bin/bash', ['bash', '/work/cmd.sh'])); // not the framework root: ppid != pid_t0
   n.gvisor(exec(25, 5, '/usr/bin/env', ['./run.sh'], { execfn: 'run.sh' }));
   assert.deepEqual(events.map((e) => e.kind), ['shim.call', 'shim.call', 'shim.call', 'proc.exec', 'proc.exec', 'proc.exec']);
-  assert.deepEqual(events.slice(0, 3).map((e) => [e.tool, e.args, e.pid]), [
-    ['crontab', ['-l'], 20],
-    ['osascript', ['-e', 'display dialog'], 21],
-    ['sudo', ['id'], 22],
+  assert.deepEqual(events.slice(0, 3).map((e) => [e.tool, e.args, e.pid, e.ppid]), [
+    ['crontab', ['-l'], 20, 5],
+    ['osascript', ['-e', 'display dialog'], 21, 5],
+    ['sudo', ['id'], 22, 5],
   ]);
   assert.deepEqual([events[3].exe, events[3].interp], ['/usr/bin/python3', '/usr/bin/python3.12']);
   assert.deepEqual([events[4].exe, events[4].pid], ['/usr/bin/bash', 24]);

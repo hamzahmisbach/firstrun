@@ -8,6 +8,8 @@
       { "name": "sentry/execve",
         "context_fields": ["time", "container_id", "thread_id", "group_id",
                            "parent_thread_group_id", "cwd", "process_name"] },
+      { "name": "sentry/clone",
+        "context_fields": ["time", "container_id", "group_id"] },
       { "name": "syscall/openat/exit", "optional_fields": ["fd_path"],
         "context_fields": ["time", "container_id", "group_id", "cwd"] },
       { "name": "syscall/open/exit",

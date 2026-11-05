@@ -94,10 +94,8 @@ export function createLlm({
 } = {}) {
   const base = (baseUrl ?? config.base_url ?? 'https://api.vultrinference.com/v1').replace(/\/+$/, '');
   const enabled = !disabled && typeof apiKey === 'string' && apiKey.length > 0;
-  /** role -> {model, calls, ms, fallback} for report.models_used (10.3). */
-  const usage = new Map();
 
-  function usageFor(callName) {
+  function usageFor(usage, callName) {
     if (!usage.has(callName)) usage.set(callName, { role: callName, model: null, calls: 0, ms: 0, fallback: true });
     return usage.get(callName);
   }
@@ -234,16 +232,17 @@ export function createLlm({
   }
 
   /**
-   * @param {string} callName key in config.calls (contract | harness | explanation)
+   * @param {Map<string, object>} usage the usage record of the client making this call
+   * @param {string} callName key in config.calls (contract | harness | review | explanation)
    * @param {{system: string, user: string}} prompt
    * @param {import('zod').ZodType} schema a strictObject from schemas.mjs
    * @param {{onRaw?: (text: string) => void, signal?: AbortSignal}} [opts] onRaw gets the raw answer (<= 8 KiB) for the run log, never for the report
    * @returns {Promise<{data: object, meta: object}>}
    */
-  async function callJson(callName, { system, user }, schema, opts = {}) {
+  async function callJson(usage, callName, { system, user }, schema, opts = {}) {
     const cfg = config.calls?.[callName];
     if (!cfg) throw new LlmError('config', `llm: unknown call ${callName}`);
-    const u = usageFor(callName);
+    const u = usageFor(usage, callName);
     if (!enabled) throw new LlmError('disabled', `llm ${callName}: disabled`);
     const stats = { attempts: 0, repairs: 0, ms: 0, bytes: 0 };
     const models = [cfg.model, cfg.fallback_model].filter((m, i, a) => m && a.indexOf(m) === i);
@@ -292,13 +291,24 @@ export function createLlm({
     });
   }
 
-  return {
-    enabled,
-    config,
-    callJson,
-    /** Report `models_used[]` (10.3): one row per role that was asked for; fallback = no valid LLM answer. */
-    modelsUsed() {
-      return [...usage.values()].map((u) => ({ ...u }));
-    },
-  };
+  /**
+   * A client with its own usage record. The service keeps one client for its whole life, so each run
+   * takes its own with forRun(): a report must list that run's calls and no other run's.
+   */
+  function scoped() {
+    /** role -> {model, calls, ms, fallback} for report.models_used (10.3). */
+    const usage = new Map();
+    return {
+      enabled,
+      config,
+      callJson: (callName, prompt, schema, opts) => callJson(usage, callName, prompt, schema, opts),
+      forRun: scoped,
+      /** Report `models_used[]` (10.3): one row per role that was asked for; fallback = no valid LLM answer. */
+      modelsUsed() {
+        return [...usage.values()].map((u) => ({ ...u }));
+      },
+    };
+  }
+
+  return scoped();
 }

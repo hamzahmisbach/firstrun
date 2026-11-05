@@ -961,7 +961,7 @@ Satu objek per run, `schema_version: 1`, immutable setelah ditulis. Batas: total
 | `coverage` | `{timed_out, tls_unreadable:[{sni, port, error}], notes[], mode, gvisor_dropped, decode_errors, pre_t0, dedup, capped, scan_truncated, oom_killed}` | Gabungan `exec.finished.coverage` (7.4) dan catatan run (TLS ditolak klien, `[ -t 0 ]`, LLM fallback, budget unwrap habis); teks untuk user ada di `verdict.coverage_notes` (9.3) |
 | `output` | `{stdout_preview, stderr_preview, stdout_bytes, stderr_bytes, truncated}` | Tambahan di luar kontrak bersama; opsional, boleh dihilangkan kalau bagian 7 memasukkan stdout sebagai event |
 | `timing` | `{queued_ms, setup_ms, unwrap_ms, exec_ms, review_ms, retry_ms?, rules_ms, explain_ms, upload_ms, total_ms}` | Untuk timeline UI dan tuning |
-| `models_used[]` | `{role:"harness"\|"contract"\|"review"\|"explanation", model, calls, ms, fallback}` | `fallback: true` = template dipakai; bukti untuk juri bahwa Serverless Inference dipakai |
+| `models_used[]` | `{role:"harness"\|"contract"\|"review"\|"explanation", model, calls, ms, fallback}` | Hanya panggilan run ini: tiap run memakai `llm.forRun()` dengan catatan pemakaiannya sendiri. `fallback: true` = tidak ada jawaban LLM yang valid; bukti untuk juri bahwa Serverless Inference dipakai |
 
 Contoh dipersingkat:
 

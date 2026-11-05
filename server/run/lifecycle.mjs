@@ -251,7 +251,7 @@ function fallbackReport(a) {
  * @param {object} [opts.limits]  overrides for timing-sensitive limits (tests)
  * @returns {(run: object, ctx: object) => Promise<void>}
  */
-export function createLifecycle({ config, llm = null, storage, docker, modules = {}, log = () => {}, now = Date.now, limits = {} }) {
+export function createLifecycle({ config, llm: sharedLlm = null, storage, docker, modules = {}, log = () => {}, now = Date.now, limits = {} }) {
   const m = modules;
   const L = {
     sinkholeReadyMs: LIMITS.sandbox.sinkholeReadyMs,
@@ -278,6 +278,8 @@ export function createLifecycle({ config, llm = null, storage, docker, modules =
 
   return async function lifecycle(run, ctx) {
     const id = run.run_id;
+    // Usage is counted per run, so models_used in a report covers this run and no other (10.3).
+    const llm = sharedLlm?.forRun ? sharedLlm.forRun() : sharedLlm;
     const runDir = path.join(config.runsDir, id);
     const dirs = {
       seed: path.join(runDir, 'seed'),

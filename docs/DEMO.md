@@ -77,6 +77,6 @@ patch rules on demo day: fall back to the cached report links (below) and the vi
 
 One run per sample on the public instance, made on 2026-11-05. They rest on the VM's local storage until Object Storage is set up.
 
-- nvm: https://firstrun.makmurlab.com/r/ASNZ6EACMW4VH33TRTTQW4V3YR
+- nvm: https://firstrun.makmurlab.com/r/B74XVMEN26HZN8TE3JY74KBHDG
 - canary: https://firstrun.makmurlab.com/r/2EQ1CFJD9ZP19F2S8T47FM2SXR
-- shim: https://firstrun.makmurlab.com/r/GESYTYEKXVFAT09CEXRMAW80T8
+- shim: https://firstrun.makmurlab.com/r/88AM2Y4Z6ETZPS4MWC3CYKTXT8

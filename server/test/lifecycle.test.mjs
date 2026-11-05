@@ -6,7 +6,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { z } from 'zod';
 import { loadConfig } from '../config.mjs';
+import { createLlm } from '../llm/client.mjs';
 import { applyReview } from '../review/apply.mjs';
 import { newRunId } from '../run/ids.mjs';
 import { RunError, createLifecycle, loadModules } from '../run/lifecycle.mjs';
@@ -423,6 +425,29 @@ describe('lifecycle with fake docker and fake modules', () => {
       await assert.rejects(t.lifecycle(makeRun(), c.ctx), (err) => err.code === 'trace_unavailable', 'no sidecar socket at all');
       writeFileSync(t.config.sinkSocket, ''); // a plain file is enough for stat() here
       await assert.rejects(t.lifecycle(makeRun(), makeCtx().ctx), (err) => err.code === 'sandbox_start_failed');
+    } finally {
+      t.close();
+    }
+  });
+
+  test('models_used covers one run: two runs in a row do not add up', async () => {
+    const answer = () => ({
+      status: 200,
+      ok: true,
+      headers: { get: () => null },
+      text: async () => JSON.stringify({ choices: [{ message: { role: 'assistant', content: '{"n":1}' }, finish_reason: 'stop' }] }),
+    });
+    const llm = createLlm({ apiKey: 'k', config: { calls: { contract: { model: 'm', json_mode: 'json_object', timeout_ms: 1000, retries: 0 } } }, fetch: async () => answer() });
+    const contract = async (client) => {
+      await client.callJson('contract', { system: 's', user: 'u' }, z.strictObject({ n: z.number() }));
+      return { contract: { summary: 'x', expected_hosts: [], expected_write_paths: [], expected_processes: [], allowed_decoy_categories: [], notes: '' }, meta: { source: 'llm', prompt_version: 't' } };
+    };
+    const t = await setup({ llm, modules: { contract } });
+    try {
+      for (let i = 0; i < 2; i += 1) {
+        await t.lifecycle(makeRun(), makeCtx().ctx);
+        assert.deepEqual(t.fakes.seen.report.modelsUsed.map((u) => [u.role, u.calls]), [['contract', 1]]);
+      }
     } finally {
       t.close();
     }

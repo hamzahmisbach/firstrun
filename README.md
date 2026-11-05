@@ -58,8 +58,8 @@ FirstRun runs the command for you, somewhere it cannot hurt, and answers with on
 | Verdict | What it means | Try it |
 |---|---|---|
 | **Malicious** | Proof from the sandbox, such as a fake credential found in an outgoing request. | [`canary` report](https://firstrun.makmurlab.com/r/2EQ1CFJD9ZP19F2S8T47FM2SXR) |
-| **Suspicious** | It did something the claim does not explain, or an AI reading of the code found a concern. Look before you decide. | [`shim` report](https://firstrun.makmurlab.com/r/GESYTYEKXVFAT09CEXRMAW80T8) |
-| **Clean** | Nothing suspicious was seen in this run. That is not a promise that the command is safe. | [`nvm` report](https://firstrun.makmurlab.com/r/ASNZ6EACMW4VH33TRTTQW4V3YR) |
+| **Suspicious** | It did something the claim does not explain, or an AI reading of the code found a concern. Look before you decide. | [`shim` report](https://firstrun.makmurlab.com/r/88AM2Y4Z6ETZPS4MWC3CYKTXT8) |
+| **Clean** | Nothing suspicious was seen in this run. That is not a promise that the command is safe. | [`nvm` report](https://firstrun.makmurlab.com/r/B74XVMEN26HZN8TE3JY74KBHDG) |
 
 Each report shows what you were told against what happened, every recorded event, the fake credentials that were on the machine, any hidden code that was decoded, and a plain explanation with a link you can share.
 
@@ -69,7 +69,7 @@ Each report shows what you were told against what happened, every recorded event
   <img src="docs/assets/live-run.gif" width="100%" alt="Screen recording of the public site. The example command is filled in, the run starts, a red banner reports a fake credential leaving the sandbox, the verdict Malicious appears, and the report page scrolls past.">
 </p>
 <p align="center">
-  <sub>Recorded from the public site in real time, nothing sped up. The red banner appears less than a second after the command starts. <a href="https://firstrun.makmurlab.com/r/NGQJMHPTW6QB9Q7CP08DZWNEV0">Open the report from this recording</a>.</sub>
+  <sub>Recorded from the public site in real time, nothing sped up. The red banner appears less than a second after the command starts. <a href="https://firstrun.makmurlab.com/r/PFVEKGXD7PK8MX3S1Y59ZMW420">Open the report from this recording</a>.</sub>
 </p>
 
 ### What makes it different
@@ -249,7 +249,7 @@ Some commands behave only under certain conditions: on a CI machine, on a server
   <img src="docs/assets/second-run.svg" width="100%" alt="Animation of a real run. A command asks Continue? and only steals a fake SSH key if someone answers y. The first run records nothing. The AI reviewer asks for one more try and picks answer_yes from a fixed menu. In the second run the fake key is opened and sent, it is caught, and the verdict is Malicious.">
 </p>
 <p align="center">
-  <sub>Taken from <a href="https://firstrun.makmurlab.com/r/5TXBHDGYV2RQGSYA22QA3A8XQW">this real run</a>.</sub>
+  <sub>Taken from <a href="https://firstrun.makmurlab.com/r/S1HQPWT9Q6DR69PXXAHAE8JEE0">this real run</a>.</sub>
 </p>
 
 The model does not get to write anything that runs. It only picks from a fixed menu, and FirstRun supplies every value:
@@ -277,7 +277,7 @@ A last model call writes the explanation from the verdict and findings. It must 
 | Honest commands such as `echo`, `python3 -c`, `ls` and `df` | **9 of 9** Clean, with no second run |
 | The `nvm` sample, the real installer from its official URL | **5 of 5** Clean |
 | [`scripts/smoke.sh`](scripts/smoke.sh) over the public address: containment, trace capture, samples, access code, kill switch, rate limit | **18 of 18** passed |
-| Unit and fixture tests (`npm test` in `server/`) | **381 of 381** passed |
+| Unit and fixture tests (`npm test` in `server/`) | **384 of 384** passed |
 
 ### The AI reviewer on public command sets
 
@@ -346,8 +346,8 @@ Three examples anyone can run without a code, all written by us and harmless:
 | Sample | You were told | What it really does | Verdict | Report |
 |---|---|---|---|---|
 | `canary` | "prints the installed Acme CLI version" | A base64 layer hides a line that sends the fake `~/.aws/credentials` to `updates.acme-cli.test`, a host that exists only inside the sandbox network | **Malicious** | [open](https://firstrun.makmurlab.com/r/2EQ1CFJD9ZP19F2S8T47FM2SXR) |
-| `shim` | "cleans temporary files" | Also probes `launchctl`, `crontab` and `systemctl`, and adds a line to `~/.bashrc` | **Suspicious** | [open](https://firstrun.makmurlab.com/r/GESYTYEKXVFAT09CEXRMAW80T8) |
-| `nvm` | "installs nvm" | The official nvm v0.40.8 installer, script-only. The fake internet answers its downloads from a stored copy of the same version | **Clean** | [open](https://firstrun.makmurlab.com/r/ASNZ6EACMW4VH33TRTTQW4V3YR) |
+| `shim` | "cleans temporary files" | Also probes `launchctl`, `crontab` and `systemctl`, and adds a line to `~/.bashrc` | **Suspicious** | [open](https://firstrun.makmurlab.com/r/88AM2Y4Z6ETZPS4MWC3CYKTXT8) |
+| `nvm` | "installs nvm" | The official nvm v0.40.8 installer, script-only. The fake internet answers its downloads from a stored copy of the same version | **Clean** | [open](https://firstrun.makmurlab.com/r/B74XVMEN26HZN8TE3JY74KBHDG) |
 
 <p align="center">
   <img src="docs/assets/report.png" width="100%" alt="The top of a report: the verdict Malicious with what to do next, then a table of what you were told against what the command actually did.">

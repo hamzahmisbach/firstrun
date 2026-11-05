@@ -151,6 +151,29 @@ test('every model failing -> LlmError with code, modelsUsed marks fallback', asy
   assert.equal(u.calls, 4);
 });
 
+test('each run counts its own usage: forRun() clients share nothing', async () => {
+  const { llm } = llmWith([reply('{"answer":"a","n":1}'), reply('{"answer":"b","n":2}'), reply('{"answer":"c","n":3}')]);
+  const first = llm.forRun();
+  const second = llm.forRun();
+  await first.callJson('thing', PROMPT, Shape);
+  await second.callJson('thing', PROMPT, Shape);
+  await second.callJson('plain', PROMPT, Shape);
+  assert.deepEqual(first.modelsUsed().map((u) => [u.role, u.calls]), [['thing', 1]]);
+  assert.deepEqual(second.modelsUsed().map((u) => [u.role, u.calls]), [['thing', 1], ['plain', 1]]);
+  assert.deepEqual(llm.modelsUsed(), [], 'nothing is counted on the service-wide client');
+  assert.equal(first.enabled, true);
+  assert.equal(first.config, CONFIG);
+});
+
+test('a run whose call fails does not inherit an earlier run\'s success', async () => {
+  const { llm } = llmWith([reply('{"answer":"a","n":1}'), reply('{}'), reply('{}'), reply('{}'), reply('{}')]);
+  await llm.forRun().callJson('thing', PROMPT, Shape);
+  const later = llm.forRun();
+  await assert.rejects(later.callJson('thing', PROMPT, Shape), LlmError);
+  assert.equal(later.modelsUsed()[0].fallback, true);
+  assert.equal(later.modelsUsed()[0].calls, 4);
+});
+
 test('429 waits Retry-After (capped at 5 s) and retries once', async () => {
   const { llm, sleeps, calls } = llmWith([reply('', { status: 429, headers: { 'retry-after': '30' } }), reply('{"answer":"ok","n":1}')]);
   const { data } = await llm.callJson('plain', PROMPT, Shape);

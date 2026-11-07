@@ -82,6 +82,8 @@ Each report shows what you were told against what happened, which program starte
 
 ## 2. Business value
 
+**In short:** someone gets a command, checks it in 10 to 20 seconds without running it on their own machine, and sends the report link to whoever needs to see it. A thousand checks a month cost about $25.30. FirstRun has no customers or pilots yet and does not run Windows commands, so this value is reasoned, not yet proven.
+
 ### Who it helps first
 
 **Engineering teams, and the IT help desks and security people who support them.** Developers paste install commands as part of the job, so "just run this" does not look strange to them, and their laptops hold the keys attackers want. FirstRun runs Linux shell commands today, which is the form a `curl | bash` install takes.

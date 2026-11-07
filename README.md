@@ -34,14 +34,15 @@ Built for the [Vultr "Agent Rush" hackathon](https://lablab.ai/ai-hackathons/vul
 ## Contents
 
 1. [What FirstRun does](#1-what-firstrun-does)
-2. [Vultr services and infrastructure used](#2-vultr-services-and-infrastructure-used)
-3. [Backend and deployment architecture](#3-backend-and-deployment-architecture)
-4. [The agent: use case and real task execution](#4-the-agent-use-case-and-real-task-execution)
-5. [How well it works](#5-how-well-it-works)
-6. [Setup steps](#6-setup-steps)
-7. [Demo](#7-demo)
-8. [Security model and limits](#8-security-model-and-limits)
-9. [License and contact](#9-license-and-contact)
+2. [Business value](#2-business-value)
+3. [Vultr services and infrastructure used](#3-vultr-services-and-infrastructure-used)
+4. [Backend and deployment architecture](#4-backend-and-deployment-architecture)
+5. [The agent: use case and real task execution](#5-the-agent-use-case-and-real-task-execution)
+6. [How well it works](#6-how-well-it-works)
+7. [Setup steps](#7-setup-steps)
+8. [Demo](#8-demo)
+9. [Security model and limits](#9-security-model-and-limits)
+10. [License and contact](#10-license-and-contact)
 
 ## 1. What FirstRun does
 
@@ -79,7 +80,55 @@ Each report shows what you were told against what happened, which program starte
 - **Fixed rules give the verdict.** An AI helps, but it can only raise a verdict, never lower it. A command cannot talk its way to a clean result.
 - **It tries again when the code is waiting for something.** If a command only misbehaves under certain conditions, the agent notices and runs it once more under those conditions.
 
-## 2. Vultr services and infrastructure used
+## 2. Business value
+
+### Who it helps first
+
+**Engineering teams, and the IT help desks and security people who support them.** Developers paste install commands as part of the job, so "just run this" does not look strange to them, and their laptops hold the keys attackers want. FirstRun already covers their most common case: a Linux shell command.
+
+| What is happening | Source |
+|---|---|
+| More than 1.1 million devices ran ClickFix-style commands between February and early May 2026, roughly an eightfold increase | [Microsoft Digital Defense Report 2026](https://www.microsoft.com/en-us/security/security-insider/threat-landscape/2026-digital-defense-report), October 2026 |
+| ClickFix made up 52% of one vendor's detections through Q2 2026, and 67% in August | [Push Security](https://pushsecurity.com/blog/the-state-of-clickfix-by-detection-data), September 2026. This is its own detection data, not the whole market |
+| Attackers increasingly dress these up as developer and AI tooling, with fake install guides for Claude Code and NotebookLM | Same Push Security report |
+
+### What changes for them
+
+| Today | The catch | With FirstRun |
+|---|---|---|
+| Run it and hope | It runs on the real laptop, next to the real keys | It runs on a fake laptop with fake keys |
+| Ask the security team | Someone has to stop and work it out by hand | The person asking sends a link to a finished report, and the reviewer starts from evidence |
+| Paste it into a chatbot | The chatbot reads the text and guesses, and planted text can fool it | The command is run, and a fooled model cannot lower the verdict |
+
+The flow fits in one line: **someone gets a command, checks it in 10 to 20 seconds, and sends the report link to whoever needs to see it.** The four public reports in the [Demo](#8-demo) took between 9.7 and 20.3 seconds from start to finish. There is also an API, so a chat bot or a ticket system could call it without a person opening the site. That integration is not built yet.
+
+### What one check costs
+
+| Checks per month | VM | Models | Total | Per check |
+|---|---|---|---|---|
+| 1,000 | $24 | $1.30 | **$25.30** | $0.025 |
+| 10,000 | $24 | $13 | **$37** | $0.004 |
+| 43,200 (the current limit of 60 runs an hour, all month) | $24 | $56 | **$80** | $0.002 |
+
+How these numbers were made, and what they leave out:
+
+- **Models: about $0.0013 per check.** Measured on 7 November 2026 with the real prompts, on inputs rebuilt from four public reports, three tries per role. The range was $0.0012 to $0.0014. The prices are the ones Vultr's own `/v1/models` lists for `deepseek-v4.1-flash-1017`: $0.15 per million input tokens and $0.60 per million output tokens.
+- **VM: $24 a month.** This is the list price from Vultr's plans API for 2 vCPU and 4 GB. The exact plan was inferred from the size of the running VM.
+- **Not included:** the unwrap helper, which only runs on hard layers, and any account-level Serverless Inference fee, because Vultr's pricing page could not be read when this was written.
+- **The top row of the table is a limit we set, not a load test.** Sustained traffic at that level has not been tried.
+
+As a rough way to weigh this, **if** each check saved a person five minutes, 1,000 checks would save about 83 hours for $25.30. The five minutes is an assumption, not a measurement.
+
+### What is not there yet
+
+- **No customers and no pilots.** The value above is reasoned, not proven. The next step is one pilot with one engineering team, measuring how many commands get checked and how much time it really saves.
+- **Windows and PowerShell.** ClickFix is common on Windows, and Windows commands are refused today. This is the biggest gap and the first thing to build after a pilot.
+- **Private reports.** Anyone with a report link can read it, which is not good enough inside a company. Teams would need sign-in and private reports.
+- **Integrations.** A chat bot and a help desk connection would put this where people already ask for help.
+
+How it would be sold is still a guess: a free public site for individuals, and a team subscription with private reports and integrations. At the costs above, one small VM could serve a team at a low cost, so the price can follow the value of the time saved.
+
+## 3. Vultr services and infrastructure used
 
 | Service | What it does here |
 |---|---|
@@ -96,7 +145,7 @@ Each report shows what you were told against what happened, which program starte
 
 Every call asks for JSON and is validated against a strict schema before anything uses it. The models were picked by testing the real prompts on the service; the evidence is written next to the settings in [`server/llm/config.json`](server/llm/config.json).
 
-## 3. Backend and deployment architecture
+## 4. Backend and deployment architecture
 
 ```mermaid
 flowchart LR
@@ -139,7 +188,7 @@ flowchart LR
 
 Two runs can go at once and eight can wait in the queue. Teardown runs in a `finally` block, and a cleaner sweeps anything left behind after 10 minutes. The full design, with every flag and its source, is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (in Indonesian).
 
-## 4. The agent: use case and real task execution
+## 5. The agent: use case and real task execution
 
 The agent has one job: find out whether what the person was told is true. It works toward that with real actions. It decodes the command, writes and runs helper scripts when decoding is not enough, runs the command for real, and then decides whether another run under different conditions would show more.
 
@@ -267,7 +316,7 @@ Secret values are fake tokens made for that run, so a key that leaves on the sec
 
 A last model call writes the explanation from the verdict and findings. It must repeat the verdict it was given, its words pass a check, and no secret value is ever in what it sees. If the call fails or disagrees with the verdict, a fixed template is used. The report is stored, and the link can be shared.
 
-## 5. How well it works
+## 6. How well it works
 
 ### On the real service
 
@@ -312,7 +361,7 @@ For comparison, [CARE](https://arxiv.org/abs/2607.21642) used the same two publi
 | Text planted in logs fooled LLMs 83.4% of the time on average | [LogInject](https://arxiv.org/abs/2607.14493) | The model gets an allowlisted summary, never raw output |
 | An LLM alone gave 8.8% false alarms; combined with behaviour rules and a decision tree, 0.03% with no loss in catch rate | [Trident](https://arxiv.org/abs/2605.00297) | Rules decide, and the model can only add to them |
 
-## 6. Setup steps
+## 7. Setup steps
 
 You need a Vultr Cloud Compute VM running Ubuntu (tested on 26.10), a Serverless Inference key, and for public access a hostname pointing at the VM. Clone the repo to `/opt/firstrun`, then:
 
@@ -336,7 +385,7 @@ cd server && npm ci && npm test
 
 Day-to-day operations such as restarting, rotating the access code, curated-only mode, the kill switch and restoring are in [docs/RUNBOOK.md](docs/RUNBOOK.md). The manual steps and the reasoning behind them are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), section 12.
 
-## 7. Demo
+## 8. Demo
 
 - **Live site:** https://firstrun.makmurlab.com
 - **Video (3 min):** added with the submission.
@@ -405,7 +454,7 @@ The report schema is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), section 10
 
 </details>
 
-## 8. Security model and limits
+## 9. Security model and limits
 
 **How the risk is contained:**
 
@@ -434,7 +483,9 @@ The report schema is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), section 10
 
 Your command text is kept in the report and is visible to anyone with the link, so **do not paste real passwords or keys**.
 
-## 9. License and contact
+<a id="9-license-and-contact"></a>
+
+## 10. License and contact
 
 MIT, see [LICENSE](LICENSE). The nvm installer used by the `nvm` sample is MIT-licensed by its authors; its notice is in [`fixtures/samples/nvm/LICENSE-nvm.md`](fixtures/samples/nvm/LICENSE-nvm.md). The IBM Plex fonts in `web/fonts/` are under the SIL Open Font License; see [`web/fonts/LICENSE-IBM-Plex.txt`](web/fonts/LICENSE-IBM-Plex.txt).
 

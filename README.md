@@ -84,7 +84,7 @@ Each report shows what you were told against what happened, which program starte
 
 ### Who it helps first
 
-**Engineering teams, and the IT help desks and security people who support them.** Developers paste install commands as part of the job, so "just run this" does not look strange to them, and their laptops hold the keys attackers want. FirstRun already covers their most common case: a Linux shell command.
+**Engineering teams, and the IT help desks and security people who support them.** Developers paste install commands as part of the job, so "just run this" does not look strange to them, and their laptops hold the keys attackers want. FirstRun runs Linux shell commands today, which is the form a `curl | bash` install takes.
 
 | What is happening | Source |
 |---|---|
@@ -115,7 +115,7 @@ How these numbers were made, and what they leave out:
 - **Models: about $0.0013 per check.** Measured on 7 November 2026 with the real prompts, on inputs rebuilt from four public reports, three tries per role. The range was $0.0012 to $0.0014. The prices are the ones Vultr's own `/v1/models` lists for `deepseek-v4.1-flash-1017`: $0.15 per million input tokens and $0.60 per million output tokens.
 - **VM: $24 a month.** This is the list price from Vultr's plans API for 2 vCPU and 4 GB. The exact plan was inferred from the size of the running VM.
 - **Not included:** the unwrap helper, which only runs on hard layers, and any account-level Serverless Inference fee, because Vultr's pricing page could not be read when this was written.
-- **The top row of the table is a limit we set, not a load test.** Sustained traffic at that level has not been tried.
+- **The bottom row of the table is a limit we set, not a load test.** Sustained traffic at that level has not been tried.
 
 As a rough way to weigh this, **if** each check saved a person five minutes, 1,000 checks would save about 83 hours for $25.30. The five minutes is an assumption, not a measurement.
 
@@ -126,7 +126,7 @@ As a rough way to weigh this, **if** each check saved a person five minutes, 1,0
 - **Private reports.** Anyone with a report link can read it, which is not good enough inside a company. Teams would need sign-in and private reports.
 - **Integrations.** A chat bot and a help desk connection would put this where people already ask for help.
 
-How it would be sold is still a guess: a free public site for individuals, and a team subscription with private reports and integrations. At the costs above, one small VM could serve a team at a low cost, so the price can follow the value of the time saved.
+How it would be sold is still a guess: a free public site for individuals, and a team subscription with private reports and integrations. The cost per check is low enough that the price can follow the time saved instead.
 
 ## 3. Vultr services and infrastructure used
 
@@ -326,7 +326,7 @@ A last model call writes the explanation from the verdict and findings. It must 
 | Honest commands such as `echo`, `python3 -c`, `ls` and `df` | **9 of 9** Clean, with no second run |
 | The `nvm` sample, the real installer from its official URL | **5 of 5** Clean |
 | [`scripts/smoke.sh`](scripts/smoke.sh) over the public address: containment, trace capture, samples, access code, kill switch, rate limit | **18 of 18** passed |
-| Unit and fixture tests (`npm test` in `server/`) | **384 of 384** passed |
+| Unit and fixture tests (`npm test` in `server/`, re-run 7 Nov 2026) | **407 of 407** passed |
 
 ### The AI reviewer on public command sets
 
@@ -388,7 +388,7 @@ Day-to-day operations such as restarting, rotating the access code, curated-only
 ## 8. Demo
 
 - **Live site:** https://firstrun.makmurlab.com
-- **Video (3 min):** added with the submission.
+- **Video (about 4 min) and slides:** added with the submission.
 
 Three examples anyone can run without a code, all written by us and harmless:
 
@@ -448,7 +448,7 @@ The report schema is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), section 10
 | `sinkhole/` | The fake internet's image |
 | `infra/` | VM setup, HTTPS, Docker runtimes, services, the trace collector |
 | `web/` | The site: plain HTML, CSS and JavaScript with no build step, and self-hosted IBM Plex fonts |
-| `fixtures/` | The samples, 71 rule test cases, captured trace logs |
+| `fixtures/` | The samples, 70 rule test cases, captured trace logs |
 | `scripts/` | Smoke test, network check, trace self-test, image builds |
 | `docs/` | Full design, runbook, demo script |
 

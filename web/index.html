@@ -67,21 +67,15 @@
               </div>
               <input class="input-plain" id="claim" name="claim" type="text" maxlength="300" autocomplete="off" placeholder="installs the Acme CLI">
             </div>
-            <div class="cell" id="code-cell">
-              <div id="code-field" class="cell-stack">
-                <div class="cell-head">
-                  <label class="label field-label" for="access-code"><span class="no" aria-hidden="true">3</span>Access code, for your own commands</label>
-                </div>
-                <input class="input-plain input-code" id="access-code" name="access-code" type="password" autocomplete="off" spellcheck="false" placeholder="Not needed for examples">
-              </div>
-              <p class="code-note" id="code-note" hidden>Examples need no access code.</p>
+            <div class="cell" id="code-cell" hidden>
+              <p class="code-note">This instance only runs the examples.</p>
             </div>
             <div class="entry-run">
               <button type="submit" class="btn btn-primary btn-run" id="submit">Run it in the sandbox</button>
             </div>
           </div>
         </div>
-        <p class="form-note" id="command-note">Takes 20 to 90 seconds. The access code stays in this tab. Do not paste real passwords or keys: the command text is kept in the report, and anyone with the link can read it.</p>
+        <p class="form-note" id="command-note">Takes 20 to 90 seconds. Do not paste real passwords or keys: the command text is kept in the report, and anyone with the link can read it.</p>
         <div id="form-error" class="error-box form-error" role="alert" tabindex="-1" hidden></div>
       </form>
     </section>

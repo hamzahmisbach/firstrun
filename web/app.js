@@ -1,17 +1,18 @@
-// Landing page: samples, the free-form form (access code in sessionStorage), the live timeline.
+// Landing page: samples, the free-form form, the live timeline.
 import { $, append, clear, createRunView, el, errorText } from './ui.js';
 import { fetchRun, openRunStream } from './sse.js';
 
-const CODE_KEY = 'firstrun.accessCode';
+// Public on purpose, so anyone can try their own commands without asking for a code. It is not a
+// secret and it only acts as an off switch: rotating FIRSTRUN_ACCESS_CODE on the server closes
+// free-form runs until this value is changed too. The rate limits are what protect the VM.
+const PUBLIC_ACCESS_CODE = '865104d03fed78ed330be61592ec0e27';
 const RUN_ID_RE = /^[0-9A-Z]{26}$/;
 const LANDING_SECTIONS = ['hero', 'specimen', 'how', 'limits']; // hidden while a run is shown
 
 const form = $('run-form');
 const commandEl = $('command');
 const claimEl = $('claim');
-const codeEl = $('access-code');
-const codeField = $('code-field');
-const codeNote = $('code-note');
+const codeCell = $('code-cell');
 const submitBtn = $('submit');
 const formError = $('form-error');
 const samplesEl = $('samples');
@@ -26,23 +27,6 @@ let samples = [];
 let selectedSample = null;
 let stream = null;
 let freeformDisabled = false;
-
-// ---------------------------------------------------------------------------------------------
-// Access code: sessionStorage only (section 11)
-
-try {
-  codeEl.value = sessionStorage.getItem(CODE_KEY) ?? '';
-} catch {
-  /* storage blocked: the field still works for this page */
-}
-codeEl.addEventListener('input', () => {
-  try {
-    if (codeEl.value) sessionStorage.setItem(CODE_KEY, codeEl.value);
-    else sessionStorage.removeItem(CODE_KEY);
-  } catch {
-    /* ignore */
-  }
-});
 
 // ---------------------------------------------------------------------------------------------
 // Samples and health
@@ -75,12 +59,9 @@ async function loadSamples() {
   }
 }
 
-/** The code is only for your own commands: an example, or an instance without free-form, needs none. */
+/** Say so when this instance only runs the examples. */
 function syncCodeField() {
-  const noCode = Boolean(selectedSample) || freeformDisabled;
-  codeField.hidden = noCode;
-  codeNote.hidden = !noCode;
-  codeNote.textContent = selectedSample ? 'Examples need no access code.' : 'This instance only runs the examples.';
+  codeCell.hidden = !freeformDisabled;
 }
 
 function selectSample(sample) {
@@ -165,10 +146,7 @@ form.addEventListener('submit', async (e) => {
     if (command.trim() === '') return showFormError('invalid_input', 'Paste the command first.');
     if (claim === '') return showFormError('invalid_input', 'Say in one line what you were told the command does.');
     if (freeformDisabled) return showFormError('freeform_disabled');
-    const code = codeEl.value;
-    if (!code) return showFormError('access_code_required');
-    if (!/^[\x21-\x7e]+$/.test(code)) return showFormError('access_code_invalid', 'Codes contain only printable ASCII characters.');
-    headers['x-firstrun-access-code'] = code;
+    headers['x-firstrun-access-code'] = PUBLIC_ACCESS_CODE;
     body = { command, claim };
   }
 

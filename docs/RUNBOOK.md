@@ -42,9 +42,9 @@ must be at least 24 characters. This writes a fresh 32-character hex code and re
 sudo sed -i "s/^FIRSTRUN_ACCESS_CODE=.*/FIRSTRUN_ACCESS_CODE=$(openssl rand -hex 16)/" /etc/firstrun/firstrun.env && sudo systemctl restart firstrun
 ```
 
-Read it back for the people who need it with `sudo grep '^FIRSTRUN_ACCESS_CODE=' /etc/firstrun/firstrun.env`
-(on your own screen only; it is never logged by the server). Give the jury its own code and rotate
-again after judging.
+The site sends a public copy of this code from `PUBLIC_ACCESS_CODE` in `web/app.js`, so anyone can run
+their own commands. Rotating closes free-form runs on the site straight away, which makes this the
+off switch. To open them again, put the new value in `web/app.js` and deploy it.
 
 ## Curated-only mode (disable free-form commands)
 

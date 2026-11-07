@@ -27,7 +27,7 @@ A website, a video or a chat tells you to paste a command into your terminal. It
 
 FirstRun checks it for you. Paste the command and one line about what you were told it does. FirstRun runs it on a throwaway fake laptop full of fake secrets, with a fake internet that records everything and forwards nothing. Then it shows you what you were told next to what the command actually did.
 
-**Try it:** open **[firstrun.makmurlab.com](https://firstrun.makmurlab.com)**, pick the example "CLI version check", and press the button. You will have an answer in about ten seconds. Examples need no account and no code.
+**Try it:** open **[firstrun.makmurlab.com](https://firstrun.makmurlab.com)**, pick the example "CLI version check", and press the button. You will have an answer in about ten seconds. Or paste your own command, even a malicious one. No account and no code needed.
 
 Built for the [Vultr "Agent Rush" hackathon](https://lablab.ai/ai-hackathons/vultr-hackathon) on lablab.ai, Challenge 1 "Blast Radius Zero".
 
@@ -404,7 +404,7 @@ Three examples anyone can run without a code, all written by us and harmless:
   <img src="docs/assets/report.png" width="100%" alt="The top of a report: the verdict Malicious with what to do next, then a table of what you were told against what the command actually did.">
 </p>
 
-**Your own commands** need an access code, which the page asks for once. A public page that runs pasted text is an abuse target by design, and this keeps one VM usable for everyone. Judges get their own code in the submission text.
+**Your own commands** work for anyone on the site, so judges can paste their own malicious commands. The page sends a public access code for you. It is in [`web/app.js`](web/app.js) on purpose and is not a secret. A public page that runs pasted text is an abuse target by design, so the rate limits are what keep one VM usable for everyone, and changing the code on the server closes this at once.
 
 **From a terminal:**
 
@@ -419,7 +419,7 @@ curl -s https://firstrun.makmurlab.com/api/runs/<run_id>           # the full re
 
 | Endpoint | What it does |
 |---|---|
-| `POST /api/runs` | Start a run. Body is `{"sample_id": "canary"}`, or `{"command": "...", "claim": "..."}` with the `x-firstrun-access-code` header. Answers `202` with `run_id` and `events_url`. |
+| `POST /api/runs` | Start a run. Body is `{"sample_id": "canary"}`, or `{"command": "...", "claim": "..."}` with the `x-firstrun-access-code` header, whose public value is in `web/app.js`. Answers `202` with `run_id` and `events_url`. |
 | `GET /api/runs/:id` | Status, and the full report once it is done. |
 | `GET /api/runs/:id/events` | Live events. Reconnects with `Last-Event-ID`. |
 | `GET /api/samples` | The curated samples. |
@@ -465,7 +465,7 @@ The report schema is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), section 10
 - **Evidence from outside:** recorders run outside the sandbox, so a process inside cannot suppress them. If the collector is down, no sandbox starts.
 - **Host:** Docker is only ever called with `execFile` and no shell. The only request value that reaches a Docker argument or a host path is the 26-character run id. Secrets are never passed to child processes.
 - **Public entry:** nginx on ports 80 and 443 is the only way in. Requests that do not name the hostname are dropped, HTTP redirects to HTTPS, and `X-Forwarded-For` is overwritten, so a client cannot pick its own rate-limit bucket. nginx keeps no access log; the service's log in journald, kept 7 days, is the only record of requests.
-- **Abuse controls:** an access code for your own commands, 5 runs per 10 minutes per address, 60 runs per hour in total, a queue of 8, a kill switch, a disk guard and an automatic cleaner.
+- **Abuse controls:** a public access code that works as an off switch for your own commands, 5 runs per 10 minutes per address, 60 runs per hour in total, a queue of 8, a kill switch, a disk guard and an automatic cleaner.
 - **Prompt injection:** untrusted text only ever sits in delimited data fields. Every model answer must pass a strict schema. Models never see token values, and they cannot lower a verdict.
 
 **What it cannot do, so you are not misled:**

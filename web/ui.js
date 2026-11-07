@@ -336,8 +336,8 @@ export const SEVERITY_LABEL = { critical: 'Critical', high: 'High', medium: 'Med
 const ERRORS = {
   // HTTP
   invalid_input: 'The command or the claim was not accepted.',
-  access_code_required: 'Running your own command needs an access code. Enter it below, or pick a sample.',
-  access_code_invalid: 'That access code is not valid.',
+  access_code_required: 'Running your own commands is closed right now. Pick an example instead.',
+  access_code_invalid: 'Running your own commands is closed right now. Pick an example instead.',
   freeform_disabled: 'This instance only runs the curated samples. Pasting your own command is turned off.',
   unsupported_platform: 'FirstRun only runs Linux commands.',
   body_too_large: 'That command is too long for this service.',
